@@ -1,0 +1,739 @@
+---
+title: "2550 Problem Set 1"
+author: "Alyson Singleton (collaborated with Katherine Webb)"
+date: "Due 9/23/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 1
+
+```{r, include=FALSE} 
+# Problem 1
+
+setwd("~/Desktop/masters/PHP2550/")
+library(dplyr)
+library(tidyr)
+
+#read in data set
+mcalindon.big <- read.csv("McAlindon_Big.csv")
+
+#confirm the data in order of id
+mcalindon.big.ordered.ID <- mcalindon.big %>%
+  arrange(ID)
+
+#remove all duplicates, only the first row off each id (person) will remain
+#call constructetd data set "mcalindon.big.ordered.ones"
+mcalindon.big.ordered.ones <- mcalindon.big.ordered.ID[!duplicated(mcalindon.big.ordered.ID$ID),]
+```
+
+### Part A
+
+Rounded average pain scores for each of the seven days are in order from day 1 to day 7 as follows: 8.9, 8.0, 7.5, 7.3, 6.8, 7.0, and 6.5. Note that they are decreasing over time, perhaps this indicated that the intervention is working. See graph of pain score report against mean pain value below.
+
+```{r, results='asis', echo = FALSE, message = FALSE, warning = FALSE}
+
+# Part A
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+#calculate means
+mean1 <- mean(mcalindon.big.ordered.ones$pain.1, na.rm = TRUE)
+mean2 <- mean(mcalindon.big.ordered.ones$pain.2, na.rm = TRUE)
+mean3 <- mean(mcalindon.big.ordered.ones$pain.3, na.rm = TRUE)
+mean4 <- mean(mcalindon.big.ordered.ones$pain.4, na.rm = TRUE)
+mean5 <- mean(mcalindon.big.ordered.ones$pain.5, na.rm = TRUE)
+mean6 <- mean(mcalindon.big.ordered.ones$pain.6, na.rm = TRUE)
+mean7 <- mean(mcalindon.big.ordered.ones$pain.7, na.rm = TRUE)
+
+#create mean vector
+means <- as.numeric(c(mean1, mean2, mean3, mean4, mean5, mean6, mean7))
+
+#create data frame to make ggplot
+dfmeans <- data.frame(c(mean1, mean2, mean3, mean4, mean5, mean6, mean7), c(1,2,3,4,5,6,7))
+
+ggplot(dfmeans, aes(x=dfmeans[,2],y=dfmeans[,1])) + 
+  geom_point(color="darkgrey") +
+  geom_smooth(col = "black", method="lm") +
+  labs(title="Pain Score Report v. Mean Values", x= "Pain Score Report", y = "Mean Values") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+```
+
+### Part B
+
+See below a table reporting the measures of linear models approximating the relationship between each of the seven pain reports and age. The measures that are reported are the estimates, standard errors, p-values, and each side of the confidence intervals.
+
+``` {r, results='asis', echo = FALSE, message = FALSE, warning = FALSE}
+# Part B
+install.packages("tidyverse", "knitr", "kableExtra")
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+pain.vars <- c('pain.1', 'pain.2', 'pain.3', 'pain.4', 'pain.5', 'pain.6', 'pain.7')
+
+#loop to calculate measures for all seven linear models and output into matrix
+matrix.lms.7 = matrix(NA,length(pain.vars),5)
+for (i in seq(length(pain.vars))){
+  lmmy <- lm(mcalindon.big.ordered.ones[,pain.vars[i]] ~ age, data=mcalindon.big.ordered.ones)
+  estimate <- summary(lmmy)$coefficients[2,1]
+  stder <- summary(lmmy)$coefficients[2,2]
+  pval <- summary(lmmy)$coefficients[2,4]
+  confin1 <- confint(lmmy)[2,1]
+  confin2 <- confint(lmmy)[2,2]
+  matrix.lms.7[i,] <- c(estimate, stder, pval, confin1, confin2)
+}
+
+#edit matrix for clarity
+matrix.lms.7 <- round(matrix.lms.7, digits=3)
+#matrix.lms.7
+colnames(matrix.lms.7) <- c("Estimate", "Standard Error", "P-Value", "Confidence Interval (Low)", "Confidence Interval (High)")
+row.names(matrix.lms.7) <- c("Model Pain 1", "Model Pain 2", "Model Pain 3", "Model Pain 4", "Model Pain 5", "Model Pain 6", "Model Pain 7")
+
+#output table
+kable(matrix.lms.7) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+
+```
+
+### Part C
+
+The intercepts of the pain on time regression ranged from 0.65 to 21.29. Their mean value was 8.529 while the median value was 8.490. I restructured the time columns so that every person's times were adjusted so that they effectively entered the study on day zero. I did this by subtracting their "lastdt1" value from all time values. This gives the intercept a useful meaning: it represents the average participant's base pain value at the time that they personally entered the study. The slopes range from -0.144 to 0.214. Their mean value is -0.0242 and their median value is -0.0249. See the boxplots below for further information about their spread. The mean of the slopes being negative aligns with what we saw in part (a) and supports the hypothesis that the intervention will facilitate pain decreasing over time.
+
+``` {r, results='asis', echo = FALSE, message = FALSE, warning = FALSE, fig.width=5,fig.height=3}
+## Part C
+
+library(ggplot2)
+library(knitr)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+
+n <- 205
+
+#use apply function to build linear models for each individual without time adjusted
+my_lms_original_times <- lapply(1:n, function(x) lm(c(pain.1, pain.2,pain.3,pain.4,pain.5,pain.6,pain.7) ~ c(lastdt1,lastdt2,lastdt3,lastdt4,lastdt5,lastdt6,lastdt7), data = mcalindon.big.ordered.ones[x,]))
+
+#use apply function to build linear models for each individual WITH time adjusted
+my_lms_updated_times <- lapply(1:n, function(x) lm(c(pain.1, pain.2,pain.3,pain.4,pain.5,pain.6,pain.7) ~ c(lastdt1-lastdt1,lastdt2-lastdt1,lastdt3-lastdt1,lastdt4-lastdt1,lastdt5-lastdt1,lastdt6-lastdt1,lastdt7-lastdt1), data = mcalindon.big.ordered.ones[x,]))
+
+#build coefficient matrices without time adjusted
+coefficients.original <- sapply(my_lms_original_times, coef)
+
+#build coefficient matrices WITH time adjusted
+coefficients.updated <- sapply(my_lms_updated_times, coef)
+
+#build dataframe to build ggplots
+coeff.updated.df <- as.data.frame(t(coefficients.updated))
+
+ggplot(coeff.updated.df, aes(x="", y=coeff.updated.df[,1])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  labs(title="Intercept Summary", x= "", y = "Intercept Value") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2)) +
+        coord_flip()
+
+ggplot(coeff.updated.df, aes(x="", y=coeff.updated.df[,2])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  labs(title="Slope Summary", x= "", y = "Slope Value") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2)) +
+        coord_flip()
+
+```
+
+### Part D
+
+Neither the intercepts nor the slopes appear to be related to the patient characteristics through visual analysis. See trendlines for continuous variables and mean values for discrete variables.
+
+``` {r, results='asis', echo = FALSE, message = FALSE, warning = FALSE, fig.width=4,fig.height=4}
+## Part D
+
+library(ggplot2)
+t.coefficients <- t(coefficients.original)
+
+# intercept plots
+
+ggplot(mcalindon.big.ordered.ones, aes(x=mcalindon.big.ordered.ones$age,y=t.coefficients[,1])) + 
+  geom_point(color="darkgrey") +
+  geom_smooth(col = "black", method="lm") +
+  labs(title="Age v. Intercept", x= "Age", y = "Linear Model Intercepts") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=mcalindon.big.ordered.ones$Race,y=t.coefficients[,1])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Race v. Intercept", x= "Race", y = "Linear Model Intercepts") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=6), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$inccat), y=t.coefficients[,1])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Income v. Intercept", x= "Income", y = "Linear Model Intercepts") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$treat),y=t.coefficients[,1])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Treatment v. Intercept", x= "Treatment", y = "Linear Model Intercepts") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$sex),y=t.coefficients[,1])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Sex v. Intercept", x= "Sex", y = "Linear Model Intercepts") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$retire),y=t.coefficients[,1])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Occupation Status v. Intercept", x= "Occupation Status", y = "Linear Model Intercepts") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$nsaid),y=t.coefficients[,1])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="NSAID Use v. Intercept", x= "NSAID Use", y = "Linear Model Intercepts") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+# slope plots
+
+ggplot(mcalindon.big.ordered.ones, aes(x=mcalindon.big.ordered.ones$age,y=t.coefficients[,2])) + 
+  geom_point(color="darkgrey") +
+  geom_smooth(col = "black", method="lm") +
+  labs(title="Age v. Slope", x= "Age", y = "Linear Model Slopes") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=mcalindon.big.ordered.ones$Race,y=t.coefficients[,2])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Race v. Slope", x= "Race", y = "Linear Model Slopes") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=6), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$inccat),y=t.coefficients[,2])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Income v. Slope", x= "Income", y = "Linear Model Slopes") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$treat),y=t.coefficients[,2])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Treatment v. Slope", x= "Treatment", y = "Linear Model Slopes") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$sex),y=t.coefficients[,2])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Sex v. Slope", x= "Sex", y = "Linear Model Slopes") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$retire),y=t.coefficients[,2])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="Occupation Status v. Slopes", x= "Occupation Status", y = "Linear Model Slopes") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(mcalindon.big.ordered.ones, aes(x=as.factor(mcalindon.big.ordered.ones$nsaid),y=t.coefficients[,2])) + 
+  geom_boxplot(outlier.color="black", outlier.shape=16, 
+               outlier.size=2, notch=FALSE, fill="lightgrey") +
+  geom_smooth(col = "slategray", method="lm") +
+  labs(title="NSAID Use v. Slope", x= "NSAID Use", y = "Linear Model Slopes") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+
+```
+
+
+### Part E
+Pain does not appear to be correlated with temperature. You can see in the histogram below that the distribution of correlation values is centered around 0 and additionally has both positive and negative values. It appears there might be slightly more positive values than negative, but not substancially more.
+
+
+``` {r, results='asis', echo = FALSE, message = FALSE, warning = FALSE, fig.width=5,fig.height=3}
+## Part E
+
+# data cleaning to get the temps for pain dates
+ID.numbers <- unique(mcalindon.big$ID)
+vector.to.hold.cors <- c(1:205)
+df.weather.vals <- vector("list", length(205))
+
+#vector.to.hold.weather.vals <- numeric(length=7)
+for (ii in seq(length(ID.numbers))) {
+  #get subset of all rows for particular id number
+  subset.ID <- mcalindon.big[mcalindon.big$ID==ID.numbers[ii],]
+  #get pain values
+  pain.values <- as.numeric(c(subset.ID$pain.1[1],subset.ID$pain.2[1], subset.ID$pain.3[1], subset.ID$pain.4[1], subset.ID$pain.5[1], subset.ID$pain.6[1], subset.ID$pain.7[1]))
+  #get date values
+  date.values <- as.numeric(c(subset.ID$lastdt1[1],subset.ID$lastdt2[1], subset.ID$lastdt3[1], subset.ID$lastdt4[1], subset.ID$lastdt5[1], subset.ID$lastdt6[1], subset.ID$lastdt7[1]))
+  #for each date value
+  #AND for each row 
+  vector.to.hold.weather.vals <- numeric(length=7)
+  for (i in seq(length(date.values))){
+    for(j in seq(nrow(subset.ID))){
+      if(is.na(date.values[i])) vector.to.hold.weather.vals[i]=NA else
+      if(date.values[i]==subset.ID$WeatherDate[j]) (vector.to.hold.weather.vals[i] <- subset.ID$avgtemp[j])
+    }
+  }
+  #add correlations to output vector
+  vector.to.hold.cors[ii] <- cor(pain.values, vector.to.hold.weather.vals, use="complete.obs")
+  #build dataframe for parts e and f
+  df.weather.vals[[ii]] <- data.frame(pain.values, date.values, vector.to.hold.weather.vals)
+}
+
+#build dataframe to build ggplot and following problems
+vec.cors.df <- as.data.frame(vector.to.hold.cors)
+
+ggplot(vec.cors.df, aes(x=vec.cors.df[,1])) + 
+  geom_histogram(bins = 10, color = "black", fill ="lightgrey") +
+  labs(title="Correlation Summary", x= "Correlation Value", y = "Frequency") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+```
+
+### Part F
+
+The distribution of the slopes in F (see second histogram) is similar to the distribution of correlations in part E; the slopes are centered around zero with slightly more positive than negative values. This additional analysis adds valuable information and adds confidence to the results of part E.
+
+``` {r, results='asis', echo = FALSE, message = FALSE, warning = FALSE, fig.width=5,fig.height=3}
+## Part F
+
+#loop to calculate linear model measures for each individual
+vector.to.hold.intercepts <- numeric(length=205)
+vector.to.hold.slopes <- numeric(length=205)
+for (i in seq(length(df.weather.vals))){
+  lmmy <- lm(df.weather.vals[[i]][,1] ~ df.weather.vals[[i]][,3])
+  intercept <- lmmy[[1]][1]
+  slope <- lmmy[[1]][2]
+  vector.to.hold.intercepts[i] <- intercept
+  vector.to.hold.slopes[i] <- slope
+}
+  
+#build data frames for ggplot construction
+vec.int.df <- as.data.frame(vector.to.hold.intercepts)
+vec.slope.df <- as.data.frame(vector.to.hold.slopes)
+
+#build ggplots for visual analysis
+ggplot(vec.int.df, aes(x=vec.int.df[,1])) + 
+  geom_histogram(bins = 10, color = "black", fill ="lightgrey") +
+  labs(title="Intercept Summary", x= "Intercept Value", y = "Frequency") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(vec.slope.df, aes(x=vec.slope.df[,1])) + 
+  geom_histogram(bins = 10, color = "black", fill ="lightgrey") +
+  labs(title="Slope Summary", x= "Slope Value", y = "Frequency") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+```
+
+
+### Part G
+
+The addition of the time variable does not change the distribution of the intercept values or, more importantly, the distribution of the slopes. The histograms below demonstrate how little change there was as a result of adding in time. There are some slight changes, but thte general shape and values are consistent with the histogram and values from Part F. This leads us to believe that time was not a confounder in relation to temperature.
+
+``` {r, results='asis', echo = FALSE, message = FALSE, warning = FALSE, fig.width=5,fig.height=3}
+## Part G
+
+#loop to calculate linear model measures for each individual adding in adjusted time
+vector.to.hold.intercepts.f <- numeric(length=205)
+vector.to.hold.slopes.f <- numeric(length=205)
+for (i in seq(length(df.weather.vals))){
+  lmy <- lm(df.weather.vals[[i]][,1] ~ (df.weather.vals[[i]][,2] - as.numeric(c(rep(df.weather.vals[[i]][1,2],7)))) + df.weather.vals[[i]][,3])
+  intercept <- lmy[[1]][1]
+  slope <- lmy[[1]][2]
+  vector.to.hold.intercepts.f[i] <- intercept
+  vector.to.hold.slopes.f[i] <- slope
+}
+
+#build data frames for ggplot construction
+vec.int.f.df <- as.data.frame(vector.to.hold.intercepts.f)
+vec.slope.f.df <- as.data.frame(vector.to.hold.slopes.f)
+
+#build ggplots for visual analysis
+ggplot(vec.int.f.df, aes(x=vec.int.f.df[,1])) + 
+  geom_histogram(bins = 10, color = "black", fill ="lightgrey") +
+  labs(title="Intercept Summary", x= "Intercept Value", y = "Frequency") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+ggplot(vec.slope.f.df, aes(x=vec.slope.f.df[,1])) + 
+  geom_histogram(bins = 10, color = "black", fill ="lightgrey") +
+  labs(title="Slope Summary", x= "Slope Value", y = "Frequency") +
+  theme(plot.title=element_text(size=14, face="bold", hjust = 0.5),
+        axis.text.x=element_text(size=10), 
+        axis.text.y=element_text(size=10),
+        axis.title.x=element_text(size=12),
+        axis.title.y=element_text(size=12),
+        axis.line=element_line(colour="black"),
+        panel.background = element_blank(),
+        panel.grid = element_line(colour="lightgrey", size=0.2))
+
+```
+
+## Problem 3
+
+See below a table reporting the changes and comparisons of the primary and secondary outcomes of the treated and controlled groups. The first column shows the changes in outcomes in the treated group using a standard t-test. The second shows the changes in outcomes in the control group also using a standard t-test. The third column shows a comparison of the changes between the two groups for which a third t-test was used. The measures that are reported are the estimates, confidence intervals, and p-values for the final comparison. 
+
+``` {r, results='asis', echo = FALSE, message = FALSE, warning = FALSE}
+# Problem 3
+
+tai.chi = read.csv("wang.csv", header=T)
+treated = tai.chi[tai.chi$group==1, ]
+control = tai.chi[tai.chi$group!=1, ]
+
+# first column variables
+treated$dif.womac.treated.a <- treated$womac.pain.2 - treated$womac.pain.1
+treated$dif.womac.treated.b <- treated$womac.pain.3 - treated$womac.pain.1
+treated$dif.womac.treated.c <- treated$womac.pain.4 - treated$womac.pain.1
+
+treated$dif.womac.phys.func.treated.a <- treated$womac.phys.func.2 - treated$womac.phys.func.1
+treated$dif.womac.phys.func.treated.b <- treated$womac.phys.func.3 - treated$womac.phys.func.1
+treated$dif.womac.phys.func.treated.c <- treated$womac.phys.func.4 - treated$womac.phys.func.1
+
+treated$dif.womac.stiff.treated.a <- treated$womac.stiff.2 - treated$womac.stiff.1
+treated$dif.womac.stiff.treated.b <- treated$womac.stiff.3 - treated$womac.stiff.1
+treated$dif.womac.stiff.treated.c <- treated$womac.stiff.4 - treated$womac.stiff.1
+
+treated$dif.physician.vas.treated.a <- treated$physician.vas.2 - treated$physician.vas.1
+treated$dif.physician.vas.treated.b <- treated$physician.vas.3 - treated$physician.vas.1
+treated$dif.physician.vas.treated.c <- treated$physician.vas.4 - treated$physician.vas.1
+
+treated$dif.pt.global.vas.treated.a <- treated$pt.global.vas.2 - treated$pt.global.vas.1
+treated$dif.pt.global.vas.treated.b <- treated$pt.global.vas.3 - treated$pt.global.vas.1
+treated$dif.pt.global.vas.treated.c <- treated$pt.global.vas.4 - treated$pt.global.vas.1
+
+treated$dif.walkyard.treated.a <- treated$walkyard.2 - treated$walkyard.1
+treated$dif.walkyard.treated.b <- treated$walkyard.3 - treated$walkyard.1
+treated$dif.walkyard.treated.c <- treated$walkyard.4 - treated$walkyard.1
+
+treated$dif.balance.treated.a <- treated$balance.2 - treated$balance.1
+treated$dif.balance.treated.b <- treated$balance.3 - treated$balance.1
+treated$dif.balance.treated.c <- treated$balance.4 - treated$balance.1
+
+treated$dif.chairstand.treated.a <- treated$chairstand.2 - treated$chairstand.1
+treated$dif.chairstand.treated.b <- treated$chairstand.3 - treated$chairstand.1
+treated$dif.chairstand.treated.c <- treated$chairstand.4 - treated$chairstand.1
+
+treated$dif.mcs.treated.a <- treated$mcs.2 - treated$mcs.1
+treated$dif.mcs.treated.b <- treated$mcs.3 - treated$mcs.1
+treated$dif.mcs.treated.c <- treated$mcs.4 - treated$mcs.1
+
+treated$dif.pcs.treated.a <- treated$pcs.2 - treated$pcs.1
+treated$dif.pcs.treated.b <- treated$pcs.3 - treated$pcs.1
+treated$dif.pcs.treated.c <- treated$pcs.4 - treated$pcs.1
+
+treated$dif.cesd.treated.a <- treated$cesd.2 - treated$cesd.1
+treated$dif.cesd.treated.b <- treated$cesd.3 - treated$cesd.1
+treated$dif.cesd.treated.c <- treated$cesd.4 - treated$cesd.1
+
+treated$dif.self.efficacy.treated.a <- treated$self.efficacy.2 - treated$self.efficacy.1
+treated$dif.self.efficacy.treated.b <- treated$self.efficacy.3 - treated$self.efficacy.1
+treated$dif.self.efficacy.treated.c <- treated$self.efficacy.4 - treated$self.efficacy.1
+
+vars.treated <- c('dif.womac.treated.a', 'dif.womac.treated.b', 'dif.womac.treated.c', 
+          'dif.womac.phys.func.treated.a', 'dif.womac.phys.func.treated.b', 'dif.womac.phys.func.treated.c',
+          'dif.womac.stiff.treated.a', 'dif.womac.stiff.treated.b', 'dif.womac.stiff.treated.c',
+          'dif.physician.vas.treated.a', 'dif.physician.vas.treated.b', 'dif.physician.vas.treated.c',
+          'dif.pt.global.vas.treated.a', 'dif.pt.global.vas.treated.b', 'dif.pt.global.vas.treated.c',
+          'dif.walkyard.treated.a', 'dif.walkyard.treated.b', 'dif.walkyard.treated.c',
+          'dif.balance.treated.a', 'dif.balance.treated.b', 'dif.balance.treated.c',
+          'dif.chairstand.treated.a', 'dif.chairstand.treated.b', 'dif.chairstand.treated.c',
+          'dif.mcs.treated.a', 'dif.mcs.treated.b', 'dif.mcs.treated.c', 
+          'dif.pcs.treated.a', 'dif.pcs.treated.b', 'dif.pcs.treated.c', 
+          'dif.cesd.treated.a', 'dif.cesd.treated.b', 'dif.cesd.treated.c', 
+          'dif.self.efficacy.treated.a', 'dif.self.efficacy.treated.b', 'dif.self.efficacy.treated.c')
+
+#function to calculate first column values
+first.two.columns.1 = function(colname) {
+  mean <- t.test(treated[,colname], level = 0.95)[[5]]
+  conf.int1 <- t.test(treated[,colname], level = 0.95, na.rm=T)[[4]][1]
+  conf.int2 <- t.test(treated[,colname], level = 0.95, na.rm=T)[[4]][2]
+  return(c(sprintf("%1$.2f (%2$.2f, %3$.2f)", mean, conf.int1, conf.int2)))
+}
+
+#loop to build matrix for first column
+matrix.1 = matrix(NA,length(vars.treated),1)
+for (i in seq(length(vars.treated))){
+  matrix.1 [i,] = first.two.columns.1(vars.treated[[i]])
+}
+
+# second column variables
+control$dif.womac.control.a <- control$womac.pain.2 - control$womac.pain.1
+control$dif.womac.control.b <- control$womac.pain.3 - control$womac.pain.1
+control$dif.womac.control.c <- control$womac.pain.4 - control$womac.pain.1
+
+control$dif.womac.phys.func.control.a <- control$womac.phys.func.2 - control$womac.phys.func.1
+control$dif.womac.phys.func.control.b <- control$womac.phys.func.3 - control$womac.phys.func.1
+control$dif.womac.phys.func.control.c <- control$womac.phys.func.4 - control$womac.phys.func.1
+
+control$dif.womac.stiff.control.a <- control$womac.stiff.2 - control$womac.stiff.1
+control$dif.womac.stiff.control.b <- control$womac.stiff.3 - control$womac.stiff.1
+control$dif.womac.stiff.control.c <- control$womac.stiff.4 - control$womac.stiff.1
+
+control$dif.physician.vas.control.a <- control$physician.vas.2 - control$physician.vas.1
+control$dif.physician.vas.control.b <- control$physician.vas.3 - control$physician.vas.1
+control$dif.physician.vas.control.c <- control$physician.vas.4 - control$physician.vas.1
+
+control$dif.pt.global.vas.control.a <- control$pt.global.vas.2 - control$pt.global.vas.1
+control$dif.pt.global.vas.control.b <- control$pt.global.vas.3 - control$pt.global.vas.1
+control$dif.pt.global.vas.control.c <- control$pt.global.vas.4 - control$pt.global.vas.1
+
+control$dif.walkyard.control.a <- control$walkyard.2 - control$walkyard.1
+control$dif.walkyard.control.b <- control$walkyard.3 - control$walkyard.1
+control$dif.walkyard.control.c <- control$walkyard.4 - control$walkyard.1
+
+control$dif.balance.control.a <- control$balance.2 - control$balance.1
+control$dif.balance.control.b <- control$balance.3 - control$balance.1
+control$dif.balance.control.c <- control$balance.4 - control$balance.1
+
+control$dif.chairstand.control.a <- control$chairstand.2 - control$chairstand.1
+control$dif.chairstand.control.b <- control$chairstand.3 - control$chairstand.1
+control$dif.chairstand.control.c <- control$chairstand.4 - control$chairstand.1
+
+control$dif.mcs.control.a <- control$mcs.2 - control$mcs.1
+control$dif.mcs.control.b <- control$mcs.3 - control$mcs.1
+control$dif.mcs.control.c <- control$mcs.4 - control$mcs.1
+
+control$dif.pcs.control.a <- control$pcs.2 - control$pcs.1
+control$dif.pcs.control.b <- control$pcs.3 - control$pcs.1
+control$dif.pcs.control.c <- control$pcs.4 - control$pcs.1
+
+control$dif.cesd.control.a <- control$cesd.2 - control$cesd.1
+control$dif.cesd.control.b <- control$cesd.3 - control$cesd.1
+control$dif.cesd.control.c <- control$cesd.4 - control$cesd.1
+
+control$dif.self.efficacy.control.a <- control$self.efficacy.2 - control$self.efficacy.1
+control$dif.self.efficacy.control.b <- control$self.efficacy.3 - control$self.efficacy.1
+control$dif.self.efficacy.control.c <- control$self.efficacy.4 - control$self.efficacy.1
+
+vars.controlled <- c('dif.womac.control.a', 'dif.womac.control.b', 'dif.womac.control.c', 
+          'dif.womac.phys.func.control.a', 'dif.womac.phys.func.control.b', 'dif.womac.phys.func.control.c',
+          'dif.womac.stiff.control.a', 'dif.womac.stiff.control.b', 'dif.womac.stiff.control.c',
+          'dif.physician.vas.control.a', 'dif.physician.vas.control.b', 'dif.physician.vas.control.c',
+          'dif.pt.global.vas.control.a', 'dif.pt.global.vas.control.b', 'dif.pt.global.vas.control.c',
+          'dif.walkyard.control.a', 'dif.walkyard.control.b', 'dif.walkyard.control.c',
+          'dif.balance.control.a', 'dif.balance.control.b', 'dif.balance.control.c',
+          'dif.chairstand.control.a', 'dif.chairstand.control.b', 'dif.chairstand.control.c',
+          'dif.mcs.control.a', 'dif.mcs.control.b', 'dif.mcs.control.c', 
+          'dif.pcs.control.a', 'dif.pcs.control.b', 'dif.pcs.control.c', 
+          'dif.cesd.control.a', 'dif.cesd.control.b', 'dif.cesd.control.c', 
+          'dif.self.efficacy.control.a', 'dif.self.efficacy.control.b', 'dif.self.efficacy.control.c')
+
+#function to calculate second column values
+first.two.columns.2 = function(colname) {
+  mean <- t.test(control[,colname], level = 0.95)[[5]]
+  conf.int1 <- t.test(control[,colname], level = 0.95, na.rm=T)[[4]][1]
+  conf.int2 <- t.test(control[,colname], level = 0.95, na.rm=T)[[4]][2]
+  return(c(sprintf("%1$.2f (%2$.2f, %3$.2f)", mean, conf.int1, conf.int2)))
+}
+
+#loop to build matrix for second column
+matrix.2 = matrix(NA,length(vars.controlled),1)
+for (i in seq(length(vars.controlled))){
+  matrix.2 [i,] = first.two.columns.2(vars.controlled[[i]])
+}
+
+
+#function to calculate third column values
+third.column = function(colname, colname2) {
+  mean <- t.test(treated[,colname], control[,colname2])[[5]][1] - t.test(treated[,colname], control[,colname2])[[5]][2]
+  conf.int1 <- t.test(treated[,colname], control[,colname2])[[4]][1]
+  conf.int2 <- t.test(treated[,colname], control[,colname2])[[4]][2]
+  p.value <- t.test(treated[,colname], control[,colname2])[[3]]
+  return(c(sprintf("%1$.2f (%2$.2f, %3$.2f)", mean, conf.int1, conf.int2), sprintf('%.4f', round(p.value, digits=4))))
+}
+
+#loop to build matrix for third column
+matrix.3 = matrix(NA,length(vars.controlled),2)
+for (i in seq(length(vars.controlled))){
+  matrix.3[i,] = third.column(vars.treated[[i]], vars.controlled[[i]])
+}
+
+
+#combine matrix.1 matrix.2 matrix.3 into a dataframe
+
+out <- cbind(matrix.1, matrix.2, matrix.3)
+                   
+colnames(out) <- c("Tai Chi (n=20)", "Attention Control (n=20)", "Between-group differences, Tai Chivs. attention control", "P")
+row.names(out) <- c("WOMAC pain, Week 12", "WOMAC pain, Week 24", "WOMAC pain, Week 48", "WOMAC physical function, Week 12", "WOMAC physical function, Week 24", "WOMAC physical function, Week 48", "WOMAC stiffness, Week 12", "WOMAC stiffness, Week 24", "WOMAC stiffness, Week 48", "Physician VAS, Week 12", "Physician VAS, Week 24", "Physician VAS, Week 48", "Patient global VAS, Week 12", "Patient global VAS, Week 24", "Patient global VAS, Week 48", "6-minute walk test, Week 12", "6-minute walk test, Week 24", "6-minute walk test, Week 48", "Balance score, Week 12", "Balance score, Week 24", "Balance score, Week 48", "Chair stand time, Week 12", "Chair stand time, Week 24", "Chair stand time, Week 48", "SF-36 MCS, Week 12", "SF-36 MCS, Week 24", "SF-36 MCS, Week 48", "SF-36 PCS, Week 12", "SF-36 PCS, Week 24", "SF-36 PCS, Week 48", "CES-D, Week 12", "CES-D, Week 24", "CES-D, Week 48", "Self-efficacy score, Week 12", "Self-efficacy score, Week 24", "Self-efficacy score, Week 48")                           
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+#build table
+kable(out) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+
+```
+
+## Code Appendix
+
+```{r, ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
+
+
