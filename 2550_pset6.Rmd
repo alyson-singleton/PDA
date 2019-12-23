@@ -1,0 +1,912 @@
+---
+title: "2550 Problem Set 6"
+author: "Alyson Singleton"
+date: "12/12/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, results='asis', warning=F, message=F, cache=T)
+pacman::p_load(visdat)
+```
+
+
+# Introduction
+
+GFR stands for glomerular filtration rate and is considered the best measure of kidney function. We therefore use it as our outcome measure in this analysis to explore possible predictor of kidney disease. Normal kidney function is represented by a GFR of 90 or above [https://www.kidney.org/atoz/content/gfr]. We were directed to consider nonlinear transformations (polynomials, step functions, splines, generalized additive models) for continuous predictors. I note here a limitation that I did not do any investigation on potential transformation of the outcome, and also did not consider interaction terms in my analysis. If doing a more thorough investigation with an exteneded timeline I would include these analyses.
+
+# Data Exploration
+
+I addressed missingness in the data set in a similar fashion as in my Problem Set 5: (1) set a missingness threshold, (2) remove columns with missingness levels above that threshold, and (3) remove any rows that have remaining missingness. However, last homework I was interested in investigating variable selection, so elected for a less strict threshold (removal when missingness >= 30%) so as to keep more variables at the expense of the number of rows. In this homework, we have to define a lot of hyperparameters through cross validation on the training set, meaning that it is especially important to retain as many observations as possible. Additionally, I wanted to prioritize only spending time doing variable investigation only on variables for which we have a substantial amount of information. Therefore, I restricted the investigation to a threshold of variables with less than 15% missing. This meant I retained 2294 rows, compared to ~1700 for Homework 5. The remaining continous variables are investigated below (we will include the categorical variables of Black, Female and Diabetes in our GAM models at the end of the analysis.
+
+``` {r, fig.width=6,fig.height=3.5}
+setwd("~/Desktop/masters/PHP2550/pset6")
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(naniar)
+library(grDevices)
+library(GGally)
+
+# load in data, remove all variables with more that 15% missingness.  
+ioddata.complete <- read.csv("ioddata.complete.csv")
+#remove X column
+ioddata.complete$X <- NULL
+
+# separate continuous and discrete variables
+# discrete : black, female, Diabetes
+vars <- colnames(ioddata.complete)
+vars.discrete <- vars[c(6, 9, 11)]
+vars.cont <- vars[-c(6, 9, 11)]
+n.total.rows <- dim(ioddata.complete)[1]
+
+# test and training set
+# select random 1/5 of total for testing
+test.indices <- sample(n.total.rows,(n.total.rows/5),replace=F)
+test.df <- ioddata.complete[test.indices,]
+train.df <- ioddata.complete[-test.indices,]
+
+# pairs plots on all continuous variables
+
+ggpairs(ioddata.complete,
+    diag=list(continuous="density", discrete="bar"), 
+    columns=vars.cont,
+    axisLabels="show")
+```
+
+I see from the correlations displayed above the diagonal that weight and bmi are heavily correlated, so I remove weight. Additionally, I notice that SUN, SCR, and cys are also heavily correlated. I therefore remove SUN and cys. 
+
+``` {r, fig.width=6,fig.height=3.5}
+# we see weight and bmi are heavily correlated, remove weigtht
+# we see sun, scr, and cys are also heavily correlated, remove sun and cys
+ioddata.complete$WEIGHT <- NULL
+test.df$WEIGHT <- NULL
+train.df$WEIGHT <- NULL
+ioddata.complete$SUN <- NULL
+test.df$SUN <- NULL
+train.df$SUN <- NULL
+test.df$cys <- NULL
+train.df$cys <- NULL
+ioddata.complete$cys <- NULL
+
+vars.cont <- vars.cont[c(2:3,5:7)]
+
+# final pairs plots of the variables we will include in our model
+ggpairs(train.df,
+    diag=list(continuous="density", discrete="bar"), 
+    columns=vars.cont,
+    axisLabels="show")
+
+# notice BMI, SCR, AGE, and cys all appear to have non-linear retionships with GFR through visualization. we consider a variety of functions to represent these relationships in the following analysis. Height just looks like a blob so we leave it out.
+```
+
+I notice AGE, BMI, and SCR all appear to have non-linear retionships with GFR through the above visualization. We consider a variety of functions to represent these relationships in the following analysis. Height looks like a amorphous blob so I leave it out due to the limited returns I would expect the functions to provide. End conclusion: we will look at what functions might best fit AGE, BMI, and SCR.
+
+# Polynomials
+
+First, we investigate polynomial functions of different degrees for Age, BMI, and SCR. I used ANOVA to decide which degree was best for building a model representing the relationship between each variable and GFR because polynomial functions of increasing degree are technically nested! This resulted in choosing a model with a cubic polynomial (degree 3) for Age, a linear polynomial (degree 1) for BMI, and a quartic polynomial for SCR (degree 4). You can see these relationships plotted below (the dotted lines are the standard error bands!). We note that these are univariate models. Also, I used 10-fold cross-validation to calculate the average Mean Squared Error (MSE) of the chosen model for each variable across 10 different folds in the training set to estimate the performance of each model to compare to the other types of functions later in the analysis.
+
+```{r, poly age}
+##### AGE
+fit.1.age=lm(GFR~AGE,data=train.df)
+fit.2.age=lm(GFR~poly(AGE,2),data=train.df)
+fit.3.age=lm(GFR~poly(AGE,3),data=train.df)
+fit.4.age=lm(GFR~poly(AGE,4),data=train.df)
+fit.5.age=lm(GFR~poly(AGE,5),data=train.df)
+#anova(fit.1.age,fit.2.age,fit.3.age,fit.4.age,fit.5.age)
+# mildly helpful to use poly(AGE,2) or poly(AGE,3)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.AGE.perform <- matrix(NA, k.folds)
+# test different step cut options
+for(j in 1:k.folds){
+        pred=predict(fit.3.age,train.df[folds==j,])
+        cv.errors.AGE.perform[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+poly.age.mse <- mean(cv.errors.AGE.perform)
+
+#plotting prep
+predict.poly.age <- predict(fit.3.age, train.df,se=TRUE)
+se.bands.poly.age <- cbind(predict.poly.age$fit+2*predict.poly.age$se.fit,predict.poly.age$fit-2*predict.poly.age$se.fit) 
+```
+
+```{r, poly bmi}
+#### BMI
+fit.1.bmi=lm(GFR~BMI,data=train.df)
+fit.2.bmi=lm(GFR~poly(BMI,2),data=train.df)
+fit.3.bmi=lm(GFR~poly(BMI,3),data=train.df)
+fit.4.bmi=lm(GFR~poly(BMI,4),data=train.df)
+fit.5.bmi=lm(GFR~poly(BMI,5),data=train.df)
+#anova(fit.1.bmi,fit.2.bmi,fit.3.bmi,fit.4.bmi,fit.5.bmi)
+# none helpful, keep linear
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.BMI.perform <- matrix(NA, k.folds)
+# test different step cut options
+for(j in 1:k.folds){
+        pred=predict(fit.1.bmi,train.df[folds==j,])
+        cv.errors.BMI.perform[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+poly.bmi.mse <- mean(cv.errors.BMI.perform)
+
+#plotting prep
+predict.poly.bmi <- predict(fit.1.bmi, train.df,se=TRUE)
+se.bands.poly.bmi <- cbind(predict.poly.bmi$fit+2*predict.poly.bmi$se.fit,predict.poly.bmi$fit-2*predict.poly.bmi$se.fit) 
+```
+
+```{r, poly scr}
+#### SCR
+fit.1.scr=lm(GFR~SCR,data=train.df)
+fit.2.scr=lm(GFR~poly(SCR,2),data=train.df)
+fit.3.scr=lm(GFR~poly(SCR,3),data=train.df)
+fit.4.scr=lm(GFR~poly(SCR,4),data=train.df)
+fit.5.scr=lm(GFR~poly(SCR,5),data=train.df)
+#anova(fit.1.scr,fit.2.scr,fit.3.scr,fit.4.scr,fit.5.scr)
+# very helpful to use poly(SCR,4)
+
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.SCR.perform <- matrix(NA, k.folds)
+# test different step cut options
+for(j in 1:k.folds){
+        pred=predict(fit.4.scr,train.df[folds==j,])
+        cv.errors.SCR.perform[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+poly.SCR.mse <- mean(cv.errors.SCR.perform)
+#plotting prep
+predict.poly.scr <- predict(fit.4.scr, train.df,se=TRUE)
+se.bands.poly.scr <- cbind(predict.poly.scr$fit+2*predict.poly.scr$se.fit,predict.poly.scr$fit-2*predict.poly.scr$se.fit) 
+```
+
+```{r, ploy plots}
+age.plot <- ggplot() +
+  geom_point(aes(train.df$AGE, train.df$GFR), alpha=0.5, color="grey") +
+  geom_line(aes(train.df$AGE, predict.poly.age$fit, colour="blue")) +
+  geom_line(aes(train.df$AGE, se.bands.poly.age[,1]), colour="blue", linetype = 3) +
+  geom_line(aes(train.df$AGE, se.bands.poly.age[,2]), colour="blue", linetype = 3) +
+  scale_color_manual(values=c("blue"), labels=c("Polynomial"), name="Type of Function") +
+  labs(title = "Best Age Functions", y="GFR", x="Age")
+age.plot
+
+bmi.plot <- ggplot() +
+  geom_point(aes(train.df$BMI, train.df$GFR), alpha=0.5, color="grey") +
+  geom_line(aes(train.df$BMI, predict.poly.bmi$fit, colour="blue")) +
+  geom_line(aes(train.df$BMI, se.bands.poly.bmi[,1]), colour="blue", linetype = 3) +
+  geom_line(aes(train.df$BMI, se.bands.poly.bmi[,2]), colour="blue", linetype = 3) +
+  scale_color_manual(values=c("blue"), labels=c("Polynomial"), name="Type of Function") +
+  labs(title = "Best BMI Functions", y="GFR", x="BMI")
+bmi.plot
+
+scr.plot <- ggplot() +
+  geom_point(aes(train.df$SCR, train.df$GFR), alpha=0.5, color="grey") +
+  geom_line(aes(train.df$SCR, predict.poly.scr$fit, colour="blue")) +
+  geom_line(aes(train.df$SCR, se.bands.poly.scr[,1]), colour="blue", linetype = 3) +
+  geom_line(aes(train.df$SCR, se.bands.poly.scr[,2]), colour="blue", linetype = 3) +
+  scale_color_manual(values=c("blue"), labels=c("Polynomial"), name="Type of Function") +
+  labs(title = "Best SCR Functions", y="GFR", x="SCR")
+scr.plot
+```
+
+# Step functions 
+
+Next, we investigate step functions with different numbers of steps for Age, BMI, and SCR. I used 10-fold cross-validation to decide which number of steps was best for building a model representing the relationship between each variable and GFR (which minimized the MSE). I set my steps to be evenly distributed throughout the range of the variable of interest. I recognize this is a strong limitation given that the density of values are likely not evenly distributed throughout the range. A better method might be to pick the breaks based on the distribution of the values of observations. However, in the interest of time, we make this simplification for this model. This resulted in choosing a model with a 5-step step function for Age, a 1-step step function for BMI, and a 5-step step function for SCR. You can see these relationships added to the plots below. We note that these are again univariate models. Also, I used cross-validation to calculate the average Mean Squared Error (MSE) of the chosen model for each variable across 10 different folds in the training set to estimate the performance of each model to compare to the other types of functions later in the analysis.
+
+```{r}
+####### AGE
+# use cross validation to determine how many cuts (evenly distributed*** note as limitation)
+# intialization
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.AGE.step <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+# build step cut options
+AGE.step.cuts <- list()
+for(i in 1:5){
+    AGE.step.pre <- seq(from=range(train.df$AGE)[1]-0.001,to=range(train.df$AGE)[2]+0.001, length.out=i+2)
+    AGE.step.cuts[[i]] <- AGE.step.pre
+}
+# test different step cut options
+for(j in 1:k.folds){
+    for(i in 1:5){
+        train.df$AGE.step <- cut(train.df$AGE,breaks=AGE.step.cuts[[i]])
+        best.fit = lm(GFR~AGE.step,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.AGE.step[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.AGE.step=apply(cv.errors.AGE.step,2,mean)
+no.AGE.steps <- which.min(mean.cv.errors.AGE.step) #5
+
+# build best model identified
+train.df$AGE.step <- cut(train.df$AGE,breaks=AGE.step.cuts[[no.AGE.steps]])
+step.best.AGE = lm(GFR~AGE.step,data=train.df)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.AGE.perform.step <- matrix(NA, k.folds)
+# test different step cut options
+for(j in 1:k.folds){
+        pred=predict(step.best.AGE,train.df[folds==j,])
+        cv.errors.AGE.perform.step[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+step.age.mse <- mean(cv.errors.AGE.perform.step)
+
+#plotting prep
+predict.step.age <- predict(step.best.AGE, train.df,se=TRUE)
+se.bands.step.age <- cbind(predict.step.age$fit+2*predict.step.age$se.fit,predict.step.age$fit-2*predict.step.age$se.fit) 
+```
+
+```{r}
+####### BMI
+# use cross validation to determine how many cuts (evenly distributed*** note as limitation)
+# intialization
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.BMI <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+# build step cut options
+BMI.step.cuts <- list()
+for(i in 1:5){
+    BMI.step.pre <- seq(from=range(train.df$BMI)[1]-0.001,to=range(train.df$BMI)[2]+0.001, length.out=i+2)
+    BMI.step.cuts[[i]] <- BMI.step.pre
+}
+# test different step cut options
+for(j in 1:k.folds){
+    for(i in 1:5){
+        train.df$BMI.step <- cut(train.df$BMI,breaks=BMI.step.cuts[[i]])
+        best.fit = lm(GFR~BMI.step,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.BMI[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+cv.errors.BMI=apply(cv.errors.BMI,2,mean)
+no.BMI.steps <- which.min(cv.errors.BMI) #3
+
+# build best model identified
+train.df$BMI.step <- cut(train.df$BMI,breaks=BMI.step.cuts[[no.BMI.steps]])
+step.best.BMI = lm(GFR~BMI.step,data=train.df)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.BMI.perform.step <- matrix(NA, k.folds)
+# test different step cut options
+for(j in 1:k.folds){
+        pred=predict(step.best.BMI,train.df[folds==j,])
+        cv.errors.BMI.perform.step[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+step.BMI.mse <- mean(cv.errors.BMI.perform.step)
+
+#plotting prep
+predict.step.bmi <- predict(step.best.BMI, train.df,se=TRUE)
+se.bands.step.bmi <- cbind(predict.step.bmi$fit+2*predict.step.bmi$se.fit,predict.step.bmi$fit-2*predict.step.bmi$se.fit)
+```
+
+```{r}
+####### SCR
+# use cross validation to determine how many cuts (evenly distributed*** note as limitation)
+# intialization
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.SCR <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+# build step cut options
+SCR.step.cuts <- list()
+for(i in 1:5){
+    SCR.step.pre <- seq(from=range(train.df$SCR)[1]-0.001,to=range(train.df$SCR)[2]+0.001, length.out=i+2)
+    SCR.step.cuts[[i]] <- SCR.step.pre
+}
+# test different step cut options
+for(j in 1:k.folds){
+    for(i in 1:5){
+        train.df$SCR.step <- cut(train.df$SCR,breaks=SCR.step.cuts[[i]])
+        best.fit = lm(GFR~SCR.step,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.SCR[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+cv.errors.SCR=apply(cv.errors.SCR,2,mean)
+no.SCR.steps <- which.min(cv.errors.SCR) #5
+
+# build best model identified
+train.df$SCR.step <- cut(train.df$SCR,breaks=SCR.step.cuts[[no.SCR.steps]])
+step.best.SCR = lm(GFR~SCR.step,data=train.df)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.SCR.perform.step <- matrix(NA, k.folds)
+# test different step cut options
+for(j in 1:k.folds){
+        pred=predict(step.best.SCR,train.df[folds==j,])
+        cv.errors.SCR.perform.step[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+step.SCR.mse <- mean(cv.errors.SCR.perform.step)
+
+#plotting prep
+predict.step.scr <- predict(step.best.SCR, train.df,se=TRUE)
+se.bands.step.scr <- cbind(predict.step.scr$fit+2*predict.step.scr$se.fit,predict.step.scr$fit-2*predict.step.scr$se.fit)
+```
+
+```{r, ploy + step plots}
+age.plot <- age.plot +
+  geom_line(aes(train.df$AGE, predict.step.age$fit, colour="red")) +
+  geom_line(aes(train.df$AGE, se.bands.step.age[,1]), colour="red", linetype = 3) +
+  geom_line(aes(train.df$AGE, se.bands.step.age[,2]), colour="red", linetype = 3) +
+  scale_color_manual(values=c("blue", "red"), labels=c("Polynomial", "Step"), name="Type of Function")
+age.plot
+
+bmi.plot <- bmi.plot + 
+  geom_line(aes(train.df$BMI, predict.step.bmi$fit, colour="red")) +
+  geom_line(aes(train.df$BMI, se.bands.step.bmi[,1]), colour="red", linetype = 3) +
+  geom_line(aes(train.df$BMI, se.bands.step.bmi[,2]), colour="red", linetype = 3) +
+  scale_color_manual(values=c("blue", "red"), labels=c("Polynomial", "Step"), name="Type of Function")
+bmi.plot
+
+scr.plot <- scr.plot + 
+  geom_line(aes(train.df$SCR, predict.step.scr$fit, colour="red")) +
+  geom_line(aes(train.df$SCR, se.bands.step.scr[,1]), colour="red", linetype = 3) +
+  geom_line(aes(train.df$SCR, se.bands.step.scr[,2]), colour="red", linetype = 3) +
+  scale_color_manual(values=c("blue", "red"), labels=c("Polynomial", "Step"), name="Type of Function")
+scr.plot
+```
+
+# Splines
+
+Next, we investigate spline functions of different types (b-splines, natural splines, and smoothing splines), different degree (for b-splines), and different numbers of internal knots for Age, BMI, and SCR. 
+
+## B-Splines
+
+For B-splines I used 10-fold cross-validation to first decide which degree was best for building a model representing the relationship between each variable and GFR (which minimized the MSE). Then I did a second cross validation to determine the number of internal knots. Similarly as I did for the step functions, I set my knots to be evenly distributed throughout the range of the variable of interest. I recognize this is a strong limitation given that the density of values are likely not evenly distributed throughout the range. A better method might be to pick the breaks based on the distribution of the values of observations. However, in the interest of time, we again make this simplification for this model. This resulted in choosing a model with degree 3 and 1 knot for Age, a model with degree 1 and 1 knot for BMI, and a model with degree 4 and 3 knots for SCR. You can see these relationships added to the plots below. We note that these are again univariate models. Also, I used cross-validation to calculate the average Mean Squared Error (MSE) of the chosen model for each variable across 10 different folds in the training set to estimate the performance of each model to compare to the other types of functions later in the analysis.
+
+```{r}
+library(splines)
+####### AGE
+# use cross validation to determine how many cuts (evenly distributed*** note as limitation)
+# intialization
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.AGE.spline <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+# test different degree options
+for(j in 1:k.folds){
+    for(i in 1:5){
+        train.df$AGE.spline <- bs(train.df$AGE,degree=i)
+        best.fit = lm(GFR~AGE.spline,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.AGE.spline[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.AGE=apply(cv.errors.AGE.spline,2,mean)
+no.AGE.degree <- which.min(mean.cv.errors.AGE) #3
+
+# test different knot options w found degree 
+cv.errors.AGE.spline.knots <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+for(j in 1:k.folds){
+    for(i in 1:5){
+        AGE.knots <- seq(from=range(train.df$AGE)[1],to=range(train.df$AGE)[2], length.out=i+2)[2:(i+2-1)]
+        train.df$AGE.spline <- bs(train.df$AGE,knots=AGE.knots,degree=no.AGE.degree)
+        best.fit = lm(GFR~AGE.spline,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.AGE.spline.knots[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.AGE.spline=apply(cv.errors.AGE.spline.knots,2,mean)
+no.AGE.knots <- which.min(mean.cv.errors.AGE.spline) #1 (1 internal knots)
+
+# build best model identified
+AGE.knots <- seq(from=range(train.df$AGE)[1],to=range(train.df$AGE)[2], length.out=no.AGE.knots+2)[2:(no.AGE.knots+2-1)]
+train.df$AGE.spline <- bs(train.df$AGE,knots=AGE.knots,degree=no.AGE.degree)
+spline.best.AGE = lm(GFR~AGE.spline,data=train.df)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.AGE.perform.spline <- matrix(NA, k.folds)
+for(j in 1:k.folds){
+        pred=predict(spline.best.AGE,train.df[folds==j,])
+        cv.errors.AGE.perform.spline[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+spline.AGE.mse <- mean(cv.errors.AGE.perform.spline)
+```
+
+```{r}
+####### BMI
+# use cross validation to determine how many cuts (evenly distributed*** note as limitation)
+# intialization
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.BMI.spline <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+# test different degree options
+for(j in 1:k.folds){
+    for(i in 1:5){
+        train.df$BMI.spline <- bs(train.df$BMI,degree=i)
+        best.fit = lm(GFR~BMI.spline,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.BMI.spline[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.BMI=apply(cv.errors.BMI.spline,2,mean)
+no.BMI.degree <- which.min(mean.cv.errors.BMI) #1
+
+# test different knot options w found degree 
+cv.errors.BMI.spline.knots <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+for(j in 1:k.folds){
+    for(i in 1:5){
+        BMI.knots <- seq(from=range(train.df$BMI)[1],to=range(train.df$BMI)[2], length.out=i+2)[2:(i+2-1)]
+        train.df$BMI.spline <- bs(train.df$BMI,knots=BMI.knots,degree=no.BMI.degree)
+        best.fit = lm(GFR~BMI.spline,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.BMI.spline.knots[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.BMI.spline=apply(cv.errors.BMI.spline.knots,2,mean)
+no.BMI.knots <- which.min(mean.cv.errors.BMI.spline) #1 (1 internal knots)
+
+# build best model identified
+BMI.knots <- seq(from=range(train.df$BMI)[1],to=range(train.df$BMI)[2], length.out=no.BMI.knots+2)[2:(no.BMI.knots+2-1)]
+train.df$BMI.spline <- bs(train.df$BMI,knots=BMI.knots,degree=no.BMI.degree)
+spline.best.BMI = lm(GFR~BMI.spline,data=train.df)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.BMI.perform.spline <- matrix(NA, k.folds)
+for(j in 1:k.folds){
+        pred=predict(spline.best.BMI,train.df[folds==j,])
+        cv.errors.BMI.perform.spline[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+spline.BMI.mse <- mean(cv.errors.BMI.perform.spline)
+```
+
+```{r}
+####### SCR
+# use cross validation to determine how many cuts (evenly distributed*** note as limitation)
+# intialization
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.SCR.spline <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+# test different degree options
+for(j in 1:k.folds){
+    for(i in 1:5){
+        train.df$SCR.spline <- bs(train.df$SCR,degree=i)
+        best.fit = lm(GFR~SCR.spline,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.SCR.spline[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.SCR=apply(cv.errors.SCR.spline,2,mean)
+no.SCR.degree <- which.min(mean.cv.errors.SCR) #4
+
+# test different knot options w found degree 
+cv.errors.SCR.spline.knots <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+for(j in 1:k.folds){
+    for(i in 1:5){
+        SCR.knots <- seq(from=range(train.df$SCR)[1],to=range(train.df$SCR)[2], length.out=i+2)[2:(i+2-1)]
+        train.df$SCR.spline <- bs(train.df$SCR,knots=SCR.knots,degree=no.SCR.degree)
+        best.fit = lm(GFR~SCR.spline,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.SCR.spline.knots[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.SCR.spline=apply(cv.errors.SCR.spline.knots,2,mean)
+no.SCR.knots <- which.min(mean.cv.errors.SCR.spline) #3 (3 internal knots)
+
+# build best model identified
+SCR.knots <- seq(from=range(train.df$SCR)[1],to=range(train.df$SCR)[2], length.out=no.SCR.knots+2)[2:(no.SCR.knots+2-1)]
+train.df$SCR.spline <- bs(train.df$SCR,knots=SCR.knots,degree=no.SCR.degree)
+spline.best.SCR = lm(GFR~SCR.spline,data=train.df)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.SCR.perform.spline <- matrix(NA, k.folds)
+for(j in 1:k.folds){
+        pred=predict(spline.best.SCR,train.df[folds==j,])
+        cv.errors.SCR.perform.spline[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+spline.SCR.mse <- mean(cv.errors.SCR.perform.spline)
+```
+
+```{r, ploy + step + bs plots}
+
+
+#plotting prep
+predict.bs.age <- predict(spline.best.AGE, train.df,se=TRUE)
+se.bands.bs.age <- cbind(predict.bs.age$fit+2*predict.bs.age$se.fit,predict.bs.age$fit-2*predict.bs.age$se.fit)
+
+#plotting prep
+predict.bs.bmi <- predict(spline.best.BMI, train.df,se=TRUE)
+se.bands.bs.bmi <- cbind(predict.bs.bmi$fit+2*predict.bs.bmi$se.fit,predict.bs.bmi$fit-2*predict.bs.bmi$se.fit)
+
+#plotting prep
+predict.bs.scr <- predict(spline.best.SCR, train.df,se=TRUE)
+se.bands.bs.scr <- cbind(predict.bs.scr$fit+2*predict.bs.scr$se.fit,predict.bs.scr$fit-2*predict.bs.scr$se.fit)
+
+
+
+age.plot <- age.plot +
+  geom_line(aes(train.df$AGE, predict.bs.age$fit, colour="green")) +
+  geom_line(aes(train.df$AGE, se.bands.bs.age[,1]), colour="green", linetype = 3) +
+  geom_line(aes(train.df$AGE, se.bands.bs.age[,2]), colour="green", linetype = 3) +
+  scale_color_manual(values=c("blue", "green", "red"), labels=c("Polynomial", "B-Spline",  "Step"), name="Type of Function")
+age.plot
+
+bmi.plot <- bmi.plot + 
+  geom_line(aes(train.df$BMI, predict.bs.bmi$fit, colour="green")) +
+  geom_line(aes(train.df$BMI, se.bands.bs.bmi[,1]), colour="green", linetype = 3) +
+  geom_line(aes(train.df$BMI, se.bands.bs.bmi[,2]), colour="green", linetype = 3) +
+  scale_color_manual(values=c("blue", "green", "red"), labels=c("Polynomial", "B-Spline",  "Step"), name="Type of Function")
+bmi.plot
+
+scr.plot <- scr.plot + 
+  geom_line(aes(train.df$SCR, predict.bs.scr$fit, colour="green")) +
+  geom_line(aes(train.df$SCR, se.bands.bs.scr[,1]), colour="green", linetype = 3) +
+  geom_line(aes(train.df$SCR, se.bands.bs.scr[,2]), colour="green", linetype = 3) +
+  scale_color_manual(values=c("blue", "green", "red"), labels=c("Polynomial", "B-Spline",  "Step"), name="Type of Function")
+scr.plot
+```
+
+## Natural Cubic Splines
+
+For natural splines I used 10-fold cross-validation to determine the number of internal knots (degree is restricted to 3 in the function). Similarly as I did for the step function and b-spline analysis, I set my knots to be evenly distributed throughout the range of the variable of interest. This resulted in choosing a model with 3 knots for Age, a model with 1 knot for BMI, and a model with 5 knots for SCR. You can see these relationships added to the plots below. We note that these are again univariate models. Also, I used cross-validation to calculate the average Mean Squared Error (MSE) of the chosen model for each variable across 10 different folds in the training set to estimate the performance of each model to compare to the other types of functions later in the analysis.
+
+```{r}
+####### AGE
+# use cross validation to determine how many knots (evenly distributed*** note as limitation)
+# intialization
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+# no need to test degree!! defined in function as cubic, leave as such
+
+# test different knot options w found degree 
+cv.errors.AGE.spline.knots.ns <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+for(j in 1:k.folds){
+    for(i in 1:5){
+        AGE.knots <- seq(from=range(train.df$AGE)[1],to=range(train.df$AGE)[2], length.out=i+2)[2:(i+2-1)]
+        train.df$AGE.spline <- ns(train.df$AGE,knots=AGE.knots)
+        best.fit = lm(GFR~AGE.spline,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.AGE.spline.knots.ns[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.AGE.spline.ns=apply(cv.errors.AGE.spline.knots.ns,2,mean)
+no.AGE.knots.ns <- which.min(mean.cv.errors.AGE.spline.ns) #3 (3 internal knots)
+
+
+# build best model identified
+AGE.knots.ns <- seq(from=range(train.df$AGE)[1],to=range(train.df$AGE)[2], length.out=no.AGE.knots.ns+2)[2:(no.AGE.knots.ns+2-1)]
+train.df$AGE.spline.ns <- ns(train.df$AGE,knots=AGE.knots.ns)
+spline.best.AGE.ns = lm(GFR~AGE.spline.ns,data=train.df)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.AGE.perform.spline.ns <- matrix(NA, k.folds)
+for(j in 1:k.folds){
+        pred=predict(spline.best.AGE.ns,train.df[folds==j,])
+        cv.errors.AGE.perform.spline.ns[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+spline.ns.AGE.mse <- mean(cv.errors.AGE.perform.spline.ns)
+```
+
+```{r}
+####### BMI
+# use cross validation to determine how many knots (evenly distributed*** note as limitation)
+# intialization
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+# no need to test degree!! defined in function as cubic, leave as such
+
+# test different knot options w found degree 
+cv.errors.BMI.spline.knots.ns <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+for(j in 1:k.folds){
+    for(i in 1:5){
+        BMI.knots <- seq(from=range(train.df$BMI)[1],to=range(train.df$BMI)[2], length.out=i+2)[2:(i+2-1)]
+        train.df$BMI.spline <- ns(train.df$BMI,knots=BMI.knots)
+        best.fit = lm(GFR~BMI.spline,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.BMI.spline.knots.ns[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.BMI.spline.ns=apply(cv.errors.BMI.spline.knots.ns,2,mean)
+no.BMI.knots.ns <- which.min(mean.cv.errors.BMI.spline.ns) #1 (1 internal knots)
+
+
+# build best model identified
+BMI.knots.ns <- seq(from=range(train.df$BMI)[1],to=range(train.df$BMI)[2], length.out=no.BMI.knots.ns+2)[2:(no.BMI.knots.ns+2-1)]
+train.df$BMI.spline.ns <- ns(train.df$BMI,knots=BMI.knots.ns)
+spline.best.BMI.ns = lm(GFR~BMI.spline.ns,data=train.df)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.BMI.perform.spline.ns <- matrix(NA, k.folds)
+for(j in 1:k.folds){
+        pred=predict(spline.best.BMI.ns,train.df[folds==j,])
+        cv.errors.BMI.perform.spline.ns[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+spline.ns.BMI.mse <- mean(cv.errors.BMI.perform.spline.ns)
+```
+
+```{r}
+####### SCR
+# use cross validation to determine how many knots (evenly distributed*** note as limitation)
+# intialization
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+# no need to test degree!! defined in function as cubic, leave as such
+
+# test different knot options w found degree 
+cv.errors.SCR.spline.knots.ns <- matrix(NA, k.folds, 5, dimnames=list(NULL, paste(1:5)))
+for(j in 1:k.folds){
+    for(i in 1:5){
+        SCR.knots <- seq(from=range(train.df$SCR)[1],to=range(train.df$SCR)[2], length.out=i+2)[2:(i+2-1)]
+        train.df$SCR.spline <- ns(train.df$SCR,knots=SCR.knots)
+        best.fit = lm(GFR~SCR.spline,data=train.df[folds!=j,])
+        pred=predict(best.fit,train.df[folds==j,])
+        cv.errors.SCR.spline.knots.ns[j,i]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+}
+mean.cv.errors.SCR.spline.ns=apply(cv.errors.SCR.spline.knots.ns,2,mean)
+no.SCR.knots.ns <- which.min(mean.cv.errors.SCR.spline.ns) #5 (5 internal knots)
+
+
+# build best model identified
+SCR.knots.ns <- seq(from=range(train.df$SCR)[1],to=range(train.df$SCR)[2], length.out=no.SCR.knots.ns+2)[2:(no.SCR.knots.ns+2-1)]
+train.df$SCR.spline.ns <- ns(train.df$SCR,knots=SCR.knots.ns)
+spline.best.SCR.ns = lm(GFR~SCR.spline.ns,data=train.df)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.SCR.perform.spline.ns <- matrix(NA, k.folds)
+for(j in 1:k.folds){
+        pred=predict(spline.best.SCR.ns,train.df[folds==j,])
+        cv.errors.SCR.perform.spline.ns[j]=mean((train.df$GFR[folds==j] - pred)^2)
+    }
+spline.ns.SCR.mse <- mean(cv.errors.SCR.perform.spline.ns)
+```
+
+```{r, ploy + step + bs + ns plots}
+
+
+#plotting prep
+predict.ns.age <- predict(spline.best.AGE.ns, train.df,se=TRUE)
+se.bands.ns.age <- cbind(predict.ns.age$fit+2*predict.ns.age$se.fit,predict.ns.age$fit-2*predict.ns.age$se.fit)
+
+#plotting prep
+predict.ns.bmi <- predict(spline.best.BMI.ns, train.df,se=TRUE)
+se.bands.ns.bmi <- cbind(predict.ns.bmi$fit+2*predict.ns.bmi$se.fit,predict.ns.bmi$fit-2*predict.ns.bmi$se.fit)
+
+#plotting prep
+predict.ns.scr <- predict(spline.best.SCR.ns, train.df,se=TRUE)
+se.bands.ns.scr <- cbind(predict.ns.scr$fit+2*predict.ns.scr$se.fit,predict.ns.scr$fit-2*predict.ns.scr$se.fit)
+
+
+
+age.plot <- age.plot +
+  geom_line(aes(train.df$AGE, predict.ns.age$fit, colour="yellow")) +
+  geom_line(aes(train.df$AGE, se.bands.ns.age[,1]), colour="yellow", linetype = 3) +
+  geom_line(aes(train.df$AGE, se.bands.ns.age[,2]), colour="yellow", linetype = 3) +
+  scale_color_manual(values=c("blue", "green", "red", "yellow"), labels=c("Polynomial", "B-Spline",  "Step", "Natural Spline"), name="Type of Function")
+age.plot
+
+bmi.plot <- bmi.plot + 
+  geom_line(aes(train.df$BMI, predict.ns.bmi$fit, colour="yellow")) +
+  geom_line(aes(train.df$BMI, se.bands.ns.bmi[,1]), colour="yellow", linetype = 3) +
+  geom_line(aes(train.df$BMI, se.bands.ns.bmi[,2]), colour="yellow", linetype = 3) +
+  scale_color_manual(values=c("blue", "green", "red", "yellow"), labels=c("Polynomial", "B-Spline",  "Step", "Natural Spline"), name="Type of Function")
+bmi.plot
+
+scr.plot <- scr.plot + 
+  geom_line(aes(train.df$SCR, predict.ns.scr$fit, colour="yellow")) +
+  geom_line(aes(train.df$SCR, se.bands.ns.scr[,1]), colour="yellow", linetype = 3) +
+  geom_line(aes(train.df$SCR, se.bands.ns.scr[,2]), colour="yellow", linetype = 3) +
+  scale_color_manual(values=c("blue", "green", "red", "yellow"), labels=c("Polynomial", "B-Spline",  "Step", "Natural Spline"), name="Type of Function")
+scr.plot
+```
+
+## Smoothing Cubic Splines
+
+For smoothings splines I used cross-validation within the function to determine the degrees of freedom that would maximize spline performance for each variable. This resulted in choosing a model with ~4df for Age, a model with  ~2df for BMI, and a model with ~7df for SCR. You can see these relationships added to the plots below (note that there are no error bars as this proved difficult to produce with the smooth.spline function and I ran out of time). We note that these are again univariate models. Also, I used cross-validation to calculate the average Mean Squared Error (MSE) of the chosen model for each variable across 10 different folds in the training set to estimate the performance of each model to compare to the other types of functions later in the analysis.
+
+```{r}
+####### AGE
+# use cross validation to determine how many df (within function)
+fit.smoothspline.AGE=smooth.spline(train.df$AGE,train.df$GFR,cv=TRUE)  #Use cross-validation to determine lambda
+smoothspline.df.AGE <- fit.smoothspline.AGE$df
+
+# build best model identified
+fit.smoothspline.AGE.best=smooth.spline(train.df$AGE,train.df$GFR)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.AGE.perform.spline.smooth <- matrix(NA, k.folds)
+for(j in 1:k.folds){
+        pred=predict(fit.smoothspline.AGE.best,newx=train.df[folds==j,])
+        cv.errors.AGE.perform.spline.smooth[j]=mean((train.df$GFR[folds==j] - pred$y)^2)
+    }
+spline.smooth.AGE.mse <- mean(cv.errors.AGE.perform.spline.smooth)
+```
+
+```{r}
+####### BMI
+# use cross validation to determine how many df (within function)
+fit.smoothspline.BMI=smooth.spline(train.df$BMI,train.df$GFR,cv=TRUE)  #Use cross-validation to determine lambda
+smoothspline.df.BMI <- fit.smoothspline.BMI$df
+
+# build best model identified
+fit.smoothspline.BMI.best=smooth.spline(train.df$BMI,train.df$GFR,df=smoothspline.df.BMI)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.BMI.perform.spline.smooth <- matrix(NA, k.folds)
+for(j in 1:k.folds){
+        pred=predict(fit.smoothspline.BMI.best,newx=train.df[folds==j,])
+        cv.errors.BMI.perform.spline.smooth[j]=mean((train.df$GFR[folds==j] - pred$y)^2)
+    }
+spline.smooth.BMI.mse <- mean(cv.errors.BMI.perform.spline.smooth)
+```
+
+```{r}
+####### SCR
+# use cross validation to determine how many df (within function)
+fit.smoothspline.SCR=smooth.spline(train.df$SCR,train.df$GFR,cv=TRUE)  #Use cross-validation to determine lambda
+smoothspline.df.SCR <- fit.smoothspline.SCR$df
+
+# build best model identified
+fit.smoothspline.SCR.best=smooth.spline(train.df$SCR,train.df$GFR,df=smoothspline.df.SCR)
+
+# cross validation to assess performance across training data
+k.folds <- 10
+folds <- sample(1:k.folds,nrow(train.df),replace=TRUE)
+cv.errors.SCR.perform.spline.smooth <- matrix(NA, k.folds)
+for(j in 1:k.folds){
+        pred=predict(fit.smoothspline.SCR.best,newx=train.df[folds==j,])
+        cv.errors.SCR.perform.spline.smooth[j]=mean((train.df$GFR[folds==j] - pred$y)^2)
+    }
+spline.smooth.SCR.mse <- mean(cv.errors.SCR.perform.spline.smooth)
+```
+
+```{r, ploy + step + bs + ns + smooth plots}
+
+
+#plotting prep
+predict.smooth.age <- predict(fit.smoothspline.AGE)
+predict.smooth.age <- merge(train.df,predict.smooth.age, by.x="AGE", by.y="x", all.x = TRUE)
+#se.bands.smooth.age <- cbind(predict.smooth.age$fit+2*predict.smooth.age$se.fit,predict.smooth.age$fit-2*predict.smooth.age$se.fit)
+
+
+#plotting prep
+predict.smooth.bmi <- predict(fit.smoothspline.BMI)
+predict.smooth.bmi <- merge(train.df,predict.smooth.bmi, by.x="BMI", by.y="x", all.x = TRUE)
+#se.bands.smooth.bmi <- cbind(predict.smooth.bmi$fit+2*predict.smooth.bmi$se.fit,predict.smooth.bmi$fit-2*predict.smooth.bmi$se.fit)
+
+#plotting prep
+predict.smooth.scr <- predict(fit.smoothspline.SCR)
+predict.smooth.scr <- merge(train.df,predict.smooth.scr, by.x="SCR", by.y="x", all.x = TRUE)
+#se.bands.smooth.scr <- cbind(predict.smooth.scr$fit+2*predict.smooth.scr$se.fit,predict.smooth.scr$fit-2*predict.smooth.scr$se.fit)
+
+age.plot <- age.plot +
+  geom_line(aes(predict.smooth.age$AGE, predict.smooth.age$y, colour="purple")) +
+  #geom_line(aes(train.df$AGE, se.bands.smooth.age[,1]), colour="purple", linetype = 3) +
+  #geom_line(aes(train.df$AGE, se.bands.smooth.age[,2]), colour="purple", linetype = 3) +
+  scale_color_manual(values=c("blue", "green", "yellow", "red" , "purple"), labels=c("Polynomial", "B-Spline", "Natural Spline", "Step", "Smoothing Spline"), name="Type of Function")
+age.plot
+
+bmi.plot <- bmi.plot + 
+  geom_line(aes(predict.smooth.bmi$BMI, predict.smooth.bmi$y, colour="purple")) +
+  #geom_line(aes(train.df$BMI, se.bands.smooth.bmi[,1]), colour="purple", linetype = 3) +
+  #geom_line(aes(train.df$BMI, se.bands.smooth.bmi[,2]), colour="purple", linetype = 3) +
+  scale_color_manual(values=c("blue", "green", "yellow", "red" , "purple"), labels=c("Polynomial", "B-Spline", "Natural Spline", "Step", "Smoothing Spline"), name="Type of Function")
+bmi.plot
+
+scr.plot <- scr.plot + 
+  geom_line(aes(predict.smooth.scr$SCR, predict.smooth.scr$y, colour="purple")) +
+  #geom_line(aes(train.df$SCR, se.bands.smooth.scr[,1]), colour="purple", linetype = 3) +
+  #geom_line(aes(train.df$SCR, se.bands.smooth.scr[,2]), colour="purple", linetype = 3) +
+  scale_color_manual(values=c("blue", "green", "yellow", "red" , "purple"), labels=c("Polynomial", "B-Spline", "Natural Spline", "Step", "Smoothing Spline"), name="Type of Function")
+scr.plot
+```
+
+# Choosing best function for each variable
+
+Now we compare the average MSE for each of the types of functions for each variable to determine which functions will help us build the best model. These are the average MSE values acquired through cross-validation across 10 different folds in the training set to estimate the performance of each model. You can see these values summarized in the table below. We conclude that the best function to model the relationship between Age and GFR is a B-Spline (recall, with degree 3 and 1 knot), between BMI and GFR is a Step function (recall, with one step) and between SCR and GFR is a B-Spline (recall, with degree 4 and 3 knots). These are the univariate models that minimized MSE. We will now consider these for inclusion in our final model.
+
+```{r}
+library(kableExtra)
+library(knitr)
+library(dplyr)
+
+# build data frame to show performance (MSE) of each type of function on each variable
+
+performance.df <- data.frame(c(poly.age.mse, poly.bmi.mse, poly.SCR.mse),
+                             c(step.age.mse, step.BMI.mse, step.SCR.mse),
+                             c(spline.AGE.mse, spline.BMI.mse, spline.SCR.mse),
+                             c(spline.ns.AGE.mse, spline.ns.BMI.mse, spline.ns.SCR.mse),
+                             c(spline.smooth.AGE.mse, spline.smooth.BMI.mse, spline.smooth.SCR.mse))
+performance.df <- t(performance.df)
+rownames(performance.df) <- c("Polynomial", "Step", "B-Spline", "Natural Spline", "Smoothing Spline")
+colnames(performance.df) <- c("AGE", "BMI", "SCR")
+
+kable(performance.df, "latex", caption = "Univariate Model Performance (MSE)", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+# Generalized additive models
+
+To build our final model we will use a generalized additive model (GAM). We begin with a base model that includes only our categorical variables: Black, Female, and Diabetes. We then construct three models, one with the best Age model, one with the best BMI model, and the last with the best SCR model. Because the base model is nested within each of these, we use ANOVA to determine the value of adding each of these transformed variables. Output of these comparisons is below. We do all of these tests on our test data set that we have held out of our training set since the beginning of this analysis.
+
+```{r, warning=FALSE}
+library(gam)
+
+# best age function -- B-Spline
+AGE.knots <- seq(from=range(test.df$AGE)[1],to=range(test.df$AGE)[2], length.out=no.AGE.knots+2)[2:(no.AGE.knots+2-1)]
+AGE.spline <- bs(test.df$AGE,knots=AGE.knots,degree=no.AGE.degree)
+
+# best bmi function -- Step
+BMI.step <- cut(test.df$BMI,breaks=BMI.step.cuts[[no.BMI.steps]])
+
+# best scr function -- B-Spline
+SCR.knots <- seq(from=range(test.df$SCR)[1],to=range(test.df$SCR)[2], length.out=no.SCR.knots+2)[2:(no.SCR.knots+2-1)]
+SCR.spline <- bs(test.df$SCR,knots=SCR.knots,degree=no.SCR.degree)
+
+# effective forward selection to see which to include (nested so can use anova again to compare :) on saved test set!)
+gam.start = gam(GFR ~ FEMALE + BLACK + Diabetes, data=test.df)
+gam.AGE = gam(GFR ~ AGE.spline + FEMALE + BLACK + Diabetes, data=test.df)
+anova(gam.start, gam.AGE)
+gam.BMI = gam(GFR ~ BMI.step + FEMALE + BLACK + Diabetes, data=test.df)
+anova(gam.start, gam.BMI)
+gam.SCR = gam(GFR ~ SCR.spline + FEMALE + BLACK + Diabetes, data=test.df)
+anova(gam.start, gam.SCR)
+```
+
+I see that the models including Age and SCR are significantly different from the base model, so I elect to keep those and leave out BMI. Next, I use ANOVA to double check that the model with both Age and SCR is better than that of the single Age and single SCR models. We find that it is! See below.
+
+**bold**Better than just Age? **bold**
+```{r, warning=FALSE}
+# then go into the two variables
+# then compare to the final with all three
+gam.AGE.SCR = gam(GFR ~ AGE.spline + SCR.spline + FEMALE + BLACK + Diabetes, data=test.df)
+anova(gam.AGE, gam.AGE.SCR)
+anova(gam.SCR, gam.AGE.SCR)
+```
+
+Lastly, we check the significance of the variables in the final model including the categorical variables and the AGE and SCR splines. Diabetes is the only variable that is insignificant, and we decide to exclude it from our final model. All others remain and we have our final GAM recommendation!
+
+# Final Model
+
+gam.final = gam (GFR ~ AGE.spline + SCR.spline + FEMALE + BLACK )
+
+This final model has 457 total degrees of freedom and 444 residual ones. Its MSE is 163.8, which is a huge drop from the univariate models as we would expect. Please see the Final GFR Predictions Visualization plot below to see a comparison of my predicted variables with the empiric values. The GAM does a relatively good job although has more trouble as the GFR value gets larger. This is a slight concern given those are the scores that are concerning, but it is able to classify them in the overall concerning region, which is reassuring.
+
+```{r}
+gam.sub.final = gam(GFR ~ AGE.spline + SCR.spline + FEMALE + BLACK + Diabetes, data=test.df)
+
+gam.final = gam(GFR ~ AGE.spline + SCR.spline + FEMALE + BLACK, data=test.df)
+
+predictions.gam <- predict(gam.final, test.df)
+gam.mse <- mean((test.df$GFR - predictions.gam)^2)
+
+predictions.plot <- ggplot() +
+  geom_point(aes(predictions.gam,test.df$GFR)) +
+  labs(title="Final GFR Predictions Visualization", x="Final GAM GFR Predictions", y="Empiric GFR Values")
+predictions.plot
+```
+
+Lastly, I note that this model is quite hard to interpret. However, by doing basic predictive plots varying just one variable you can see the basic trends in the effect of the different variables on GFR. For example, these plots for the categorical variables are shown below. We see that being a male (Female = 0) predicts a higher GFR, and being a black person (BLACK = 1) predicts a higher GFR as well. I ran out of time to construct these plots for Age and SCR splines, but I would investigate this more closely in a project with a longer time frame. Lastly, I note that I would have also considered log functions in doing a full analysis, but also ran out of time to do so here. I would have been very interested in the results of log transformations, as I suspect they would have done a comparable job in terms of performance, in addition to being much more interpretable!
+
+```{r}
+plot(gam.final)
+```
+
+# Code Appendix
+
+```{r, ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
