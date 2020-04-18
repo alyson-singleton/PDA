@@ -23,6 +23,7 @@ Analysis : Non-linear transformations, interaction terms, diagnostic plots, mode
 ### Problem Set 3
 
 Data : (1) Kidney data from Problem Set 1 and (2) radon data in Minnesota with house and county level data.
+
 Analysis : Multilevel models. (1) Construction and interpretation of multilevel model in which pain varies within patient according to time and temperature and between patients these relationships vary with patient-level factors. (2) Constuction and interpretation of a two level model for houses within counties with predictors that correspond to variables measured on houses and counties with the county level predictor uranium.
 
 ### Problem Set 4
