@@ -1,0 +1,1071 @@
+---
+title: "PHP2530 Problem Set 4"
+author: "Alyson Singleton"
+date: "4/21/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, results='asis', warning=F, message=F, cache=T)
+pacman::p_load(actuar, dplyr, kableExtra, knitr, LearnBayes, boot, lattice, gtools, ggplot2,
+               LaplacesDemon)
+```
+
+## 1. The Importance Sampling Algorithm
+#### Part A
+```{r, imp.sampA}
+# Arguments:
+
+# logTargetDensityFunc is a function of one argument:
+# logTargetDensityFunc(xVal)
+
+# logProposalDensityFunc is a function of one arguments:
+# logProposalDensityFunc(xVal)
+
+# proposalNewFunc is a function of zero arguments:
+# proposalNewFunc( )
+
+# Return Value:
+
+# This function should return nSamples many samples, the
+# corresponding log weights, as well as the estimated ESS.
+
+# When the rejectionControlConstant is non-null and a positive
+# quantity then perform rejection control and return only the
+# accepted samples with their modi_ed log weights, the
+# acceptance rate of the samples and the estimated ESS.
+
+ImpSampler <- function(nSamples, logTargetDensityFunc, logProposalDensityFunc, proposalNewFunc, rejectionControlConstant = NULL) {
+	#first check what's up with the rejectionControlConstant, i.e. null?
+  if (length(rejectionControlConstant)==0) {
+    #initialize vectors
+    allSamples <- rep(NA,nSamples)
+    logWeights <- rep(NA,nSamples) 
+    for (i in 1:nSamples){
+      allSamples[i] <- proposalNewFunc()
+      }
+    logWeights <- sapply(allSamples, logTargetDensityFunc) - sapply(allSamples, logProposalDensityFunc)
+    finalLogWeights <- logWeights 
+    finalSamples <- allSamples
+    acceptanceRate <- NA
+    effSS <- length(finalLogWeights)/(1 + var(exp(finalLogWeights)))
+  }else{ #i.e. rejectionControlConstant was non-null then
+    triedLogRs = c()
+    finalLogWeights = c()
+    finalSamples = c()
+    while (length(finalSamples) < nSamples) {
+      allSamples <- rep(NA,nSamples)
+      logWeights <- rep(NA,nSamples) 
+      for (i in 1:nSamples){
+        allSamples[i] <- proposalNewFunc()
+        }
+      logWeights <- sapply(allSamples, logTargetDensityFunc) - sapply(allSamples, logProposalDensityFunc)
+      logRs = logWeights - log(rejectionControlConstant)
+      logRs[logRs>0] = 0       # = log( min(1,w/c) )
+      PassIndicator =  (log(runif(nSamples))< logRs)
+      finalSamples = c(finalSamples, allSamples[PassIndicator])
+      triedLogRs = c(triedLogRs, logRs)
+      finalLogWeights = c(finalLogWeights, logWeights[PassIndicator]-logRs[PassIndicator])
+    }
+    qc =  mean(exp(triedLogRs))
+    acceptanceRate = length(finalSamples)/length(triedLogRs)
+    finalLogWeights = finalLogWeights[1:nSamples] + log(qc)
+    finalSamples = finalSamples[1:nSamples]
+    effSS = nSamples/(1 + var(exp(finalLogWeights))) 
+  }
+  return(list(finalSamples, finalLogWeights, effSS, acceptanceRate))
+}
+```
+#### Part B/C
+```{r, imp.sampBC}
+theta <- seq(-6,6,.01)
+fx.normal.samples <- (1/3)*dnorm(theta,mean=-2,sd=1) + (2/3)*dnorm(theta,mean=2,sd=1) 
+gx.normal.samples <- dnorm(theta,mean=0,sd=3)
+
+plot(theta, fx.normal.samples, ylim=c(0,1.1*max(fx.normal.samples)),
+      type="l", xlab="theta", ylab="", xaxs="i",
+      yaxs="i", yaxt="n", bty="n", cex=2)
+M <- 1
+lines(theta, M*gx.normal.samples)
+```
+
+#### Part D
+
+First explore the expectation of $\mu_1$.
+$$\mu_1 = E\left(\frac{1}{3}\text{Norm}(-2,1)+\frac{2}{3}\text{Norm}(2,1)\right)$$
+$$\mu_1 = E\left(\frac{1}{3}\text{Norm}(-2,1)\right)+E\left(\frac{2}{3}\text{Norm}(2,1)\right)$$
+$$\mu_1 = \frac{1}{3}(-2)+\frac{2}{3}(2) = \frac{2}{3}$$
+
+Next investigate the expectation of $\mu_2$.
+$$\mu_2 = E\left(\left(\frac{1}{3}\text{Norm}(-2,1)+\frac{2}{3}\text{Norm}(2,1)\right)^2\right)$$
+
+Finally let us compute the expectation of $\theta$.
+$$\theta = E\left(\exp\left(\frac{1}{3}\text{Norm}(-2,1)+\frac{2}{3}\text{Norm}(2,1)\right)\right)$$
+```{r, imp.sampD}
+#store the theoretically calculated values in R
+mu1True <- 2/3 
+mu2True <- 5 
+thetaTrue <- (exp(-3/2)/3) + (2*exp(5/2)/3)
+```
+
+#### Part E
+```{r, imp.sampE}
+## write f and g as r functions
+fx <- function(x){
+  (1/3)*dnorm(x,mean=-2,sd=1) + (2/3)*dnorm(x,mean=2,sd=1) 
+} 
+gx <- function(x){
+  dnorm(x,mean=0,sd=3)
+} 
+
+## write them taking the log
+logfx <- function(x){
+  log((1/3)*dnorm(x,mean=-2,sd=1) + (2/3)*dnorm(x,mean=2,sd=1)) 
+} 
+loggx <- function(x){
+  log(dnorm(x,mean=0,sd=3))
+} 
+gSampleFunc <- function(){ rnorm( 1 , mean = 0 , sd = 3 ) }
+# Function to calculate the mean of the function h(x):
+muhat <- function(hFunc, ISObject){ 
+  return(sum(hFunc(ISObject[[1]]) * exp(ISObject[[2]]))/sum(exp(ISObject[[2]])))
+  }
+####importance sampling without rejection control
+mixNormSampler <- ImpSampler(5000, logfx, loggx, gSampleFunc)
+mu1 <- function(x){x}
+mu2 <- function(x){x^2}
+theta <- function(x){exp(x)}
+estimates = c(muhat(mu1, mixNormSampler), muhat(mu2, mixNormSampler), muhat(theta, mixNormSampler))
+estimates
+# 0.7225219 4.9041803 8.0581787
+abs(estimates - c(mu1True,mu2True,thetaTrue))   #error
+# [1] 0.05585519 0.09581972 0.13786070
+mixNormSampler[[3]] # The ESS:
+# [1] 3185.469
+```
+
+#### Part F
+```{r, imp.sampF}
+####importance sampling with rejection control (1:10)
+#initialize
+accRates <- NULL ; effSSize <- NULL ; mu1Errors <- NULL ; mu2Errors <- NULL ; thetaErrors <- NULL
+#run through and store output with varying values for the rejection control as directed
+for (i in 1:10) {
+  mixNormSamp <- ImpSampler(5000, logfx, loggx, gSampleFunc, rejectionControlConstant = i)
+  accRates <- c(accRates, mixNormSamp[[4]])
+  effSSize <- c(effSSize, mixNormSamp[[3]])
+  mu1Errors <- c(mu1Errors, abs(muhat(mu1, mixNormSamp) - mu1True))
+  mu2Errors <- c(mu2Errors, abs(muhat(mu2, mixNormSamp) - mu2True))
+  thetaErrors <- c(thetaErrors, abs(muhat(theta, mixNormSamp) - thetaTrue))
+}
+round(rbind(mu1Errors, mu2Errors, thetaErrors, accRates, effSSize), 2)
+#             [,1]    [,2]    [,3]    [,4]    [,5]    [,6]    [,7]    [,8]    [,9] [,10]
+#mu1Errors    0.02    0.04    0.06    0.04    0.02    0.03    0.02    0.01    0.04 2e-02
+#mu2Errors    0.02    0.09    0.14    0.09    0.04    0.06    0.04    0.05    0.03 2e-02
+#mu3Errors    0.02    0.31    0.24    0.20    0.17    0.17    0.20    0.10    0.06 5e-02
+#accRates     0.70    0.47    0.34    0.25    0.20    0.17    0.14    0.12    0.11 1e-01
+#effSSize  4347.45 4956.41 5000.00 5000.00 5000.00 5000.00 5000.00 5000.00 5000.00 5e+03
+
+
+par(mfrow = c(1, 3))
+plot(mu1Errors, type = "l", xlab = "Rejection control constant", main = "Plot of errors in estimating mu1", ylab = "Absolute error")
+plot(mu2Errors, type = "l", xlab = "Rejection control constant", main = "Plot of errors in estimating mu2", ylab = "Absolute error")
+plot(mu3Errors, type = "l", xlab = "Rejection control constant", main = "Plot of errors in estimating mu3", ylab = "Absolute error" )
+
+
+par(mfrow = c(1, 2))
+plot(accRates, ylim = c(0, 1), type = "l", xlab = "Rejection control constant", main = "Plot of acceptance rates", ylab = "Acceptance rate")
+plot(effSSize, ylim = c(0, 5000), type = "l", xlab = "Rejection control constant", main = "Plot of ess", ylab = "ess")
+#accRates decreasing with C
+#effSSize increading with C
+```
+
+
+## 2. Chapter 10 Question 5
+#### Part A
+```{r, 10.5A}
+#build random dataset from the model
+yis <- c(rep(NA, 10))
+nis <- c(rep(NA, 10))
+xis <- c(rep(NA, 10))
+alphais <- c(rep(NA, 10))
+betais <- c(rep(NA, 10))
+
+set.seed(1)
+for (i in 1:10) {
+  alpha <- rmt(1,0,2,4)
+  alphais[i] <- alpha
+  
+  beta <- rmt(1,0,1,4)
+  betais[i] <- beta
+  
+  xi <- runif(1, min=0, max=1)
+  xis[i] <- xi
+  
+  ni <- rpois(1,5)
+  nis[i] <- ni
+  
+  p <- inv.logit(alpha + beta*xi)
+  
+  yis[i] <- rbinom(1, ni, p)
+}
+
+dataset <- cbind(yis,nis)
+#dataset
+```
+
+#### Part B
+```{r, 10.5B}
+#posterior function
+logitBin = function (theta, data)
+{
+  alpha <- theta[1]
+  beta <- theta[2]
+  y = data[,1]
+  n = data[,2]
+  N = length(xis)
+  prelikelihood <- function (y, n, alpha, beta) y*log(inv.logit(alpha + beta*xis)) + (n-y)*log((1-inv.logit(alpha + beta*xis)))
+  loglikelihood <- sum(prelikelihood(y, n, alpha, beta))
+  post = loglikelihood #+ logPrior
+  return(post)
+}
+
+#look at contours of posterior function across grid of alphas and betas
+ng = 30
+x0 = seq(-5, 5, len = ng)
+y0 = seq(-15, 10, len = ng)
+X = outer(x0, rep(1, ng))
+Y = outer(rep(1, ng), y0)
+n2 = ng^2
+Z = apply(cbind(X[1:n2], Y[1:n2]), 1, logitBin, data = dataset)
+Z = Z - max(Z)
+Z = matrix(Z, c(ng, ng))
+contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2)
+
+####Rejection sampling
+#find the mode
+tpar=laplace(logitBin,array(c(3,1),c(1,2)),data=dataset)
+logitBinT=function(theta,data,tpar)
+{
+	data=data
+	d=logitBin(theta,data)-dmt(theta,mean=c(tpar$mode), S=2*tpar$var,df=4,
+	log=TRUE)
+	return(d)
+}
+
+start=array(c(3,1),c(1,2))
+fit1=laplace(logitBinT,start,data=dataset, tpar=tpar)
+#logitBinT(fit1$mode,dataset,tpar)
+
+rejectsamp=function(logf,tpar,dmax,n,data){
+	theta=rmt(n,mean=c(tpar$mode),S=2*tpar$var,df=4)
+	lf=apply(theta,1,logf,data=data)
+	lg=dmt(theta,mean=c(tpar$mode),S=2*tpar$var,df=4,log=TRUE)
+	prob=exp(lf-lg-dmax)
+	return(theta[runif(n)<prob,])
+}
+
+theta=rejectsamp(logitBin,tpar,logitBinT(fit1$mode,dataset,tpar),2000,dataset)
+dim(theta)
+contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2)
+points(theta[,1],theta[,2])
+```
+#### Part C
+```{r, 10.5C}
+# build normal approximation
+tpar=laplace(logitBin,array(c(-1,1),c(1,2)),data=dataset)
+logitBinT=function(theta,data,tpar) {
+  data=data
+  d=logitBin(theta,data)-dmt(theta,mean=c(tpar$mode), S=2*tpar$var,df=4,log=TRUE)
+  return(d)
+}
+start=array(c(-1,1),c(1,2))
+fit1=laplace(logitBinT,start,data=dataset,tpar=tpar)
+logitBinT(fit1$mode,dataset,tpar)
+fit1$mode
+fit1$var
+```
+#### Part D
+```{r, 10.5D}
+##importance sampling
+theta = rmt(1000, mean = c(tpar$mode), S = tpar$var, df = 4)
+lf = apply(theta,1,logitBin,data=dataset)
+lp = dmt(theta, mean = c(tpar$mode), S = tpar$var, df = 4,log = TRUE)
+wt = exp(lf - lp)
+probs=wt/sum(wt, na.rm = T)
+probs[is.na(probs)] <- 0
+theta.S=theta[sample(1:1000,size=1000,prob=probs,replace=TRUE),]
+apply(theta.S,2,summary)
+
+contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2, ylab = "beta", xlab= "alpha")
+points(theta.S[,1],theta.S[,2])
+```
+#### Part E
+```{r, 10.5E}
+```
+
+
+## 3. Chapter 10 Question 8
+#### Part A
+```{r, 108A}
+# load data
+x108 <- c(-0.86,-0.30,-0.05,0.74) 
+n108 <- rep(5,length(x108))
+y108 <- c(0,1,3,5)
+dataset108<-cbind(y108,n108)
+
+#posterior function
+logitBin108 = function (theta, data)
+{
+  alpha <- theta[1]
+  beta <- theta[2]
+  y = data[,1]
+  n = data[,2]
+  prelikelihood <- function (y, n, alpha, beta) y*log(inv.logit(alpha + beta*x108)) + (n108-y)*log((1-inv.logit(alpha + beta*x108)))
+  loglikelihood <- sum(prelikelihood(y, n, alpha, beta))
+  logPrior <- 0 + 0 #non informative 
+  post = loglikelihood + logPrior
+  return(post)
+}
+
+#look at contours of posterior function across grid of alphas and betas
+ng = 50
+#grid suggestion from book
+x0 = seq(-2, 7, len = ng)
+y0 = seq(-2, 35, len = ng)
+X = outer(x0, rep(1, ng))
+Y = outer(rep(1, ng), y0)
+n2 = ng^2
+Z = apply(cbind(X[1:n2], Y[1:n2]), 1, logitBin108, data = dataset108)
+Z = exp(Z)
+Z = matrix(Z, c(ng, ng))
+contour(x0, y0, Z, levels = c(seq(4.822959e-39, 2.737619e-03, length.out=10)), 
+        lwd = 1, ylab = "beta", xlab= "alpha")
+
+# build normal approximation
+tpar=laplace(logitBin108,array(c(1,10),c(1,2)),data=dataset108)
+betabinT108=function(theta,data,tpar)
+{
+	data=data
+	d=logitBin108(theta,data)-dmt(theta,mean=c(tpar$mode), S=2*tpar$var,df=4,log=TRUE)
+	return(d)
+}
+start=array(c(1,10),c(1,2))
+fit1=laplace(betabinT108,start,data=dataset108, tpar=tpar)
+betabinT108(fit1$mode,dataset108,tpar)
+
+#importance resampling SIR without replacement
+theta = rmt(10000, mean = c(tpar$mode), S = tpar$var, df = 4)
+lf = apply(theta,1,logitBin108,data=dataset108)
+lf[is.na(lf)] <- 0
+lp = dmt(theta, mean = c(tpar$mode), S = tpar$var, df = 4,log = TRUE)
+md = max(lf - lp)
+wt = exp(lf - lp)
+probs=wt/sum(wt)
+theta.S=theta[sample(1:10000,size=10000,prob=exp(probs),replace=F),]
+apply(theta.S,2,summary)
+
+contour(x0, y0, Z, levels = c(seq(4.822959e-39, 2.737619e-03, length.out=10)), 
+        lwd = 1, ylab = "beta", xlab= "alpha")
+points(theta.S[,1],theta.S[,2], pch='.')
+```
+
+#### Part B
+
+#### Part C
+```{r, 108C}
+#importance resampling SIR WITH replacement
+theta = rmt(10000, mean = c(tpar$mode), S = tpar$var, df = 4)
+lf = apply(theta,1,logitBin108,data=dataset108)
+lf[is.na(lf)] <- 0
+lp = dmt(theta, mean = c(tpar$mode), S = tpar$var, df = 4,log = TRUE)
+md = max(lf - lp)
+wt = exp(lf - lp)
+probs=wt/sum(wt)
+theta.S=theta[sample(1:10000,size=10000,prob=exp(probs),replace=T),]
+apply(theta.S,2,summary)
+
+contour(x0, y0, Z, levels = c(seq(4.822959e-39, 2.737619e-03, length.out=10)), 
+        lwd = 1, ylab = "beta", xlab= "alpha")
+points(theta.S[,1],theta.S[,2], pch='.')
+```
+
+
+
+## 4. Chapter 11 Question 2
+```{r, 112}
+#initializations
+sims <- 10000
+theta <-  matrix(0, nrow = sims, ncol = 2) 
+r.all <- rep(0,sims) 
+
+#starting positions found from normal approximation
+theta[1,] <- c(0.847,7.749)
+
+#jumping function
+jumping <- function(theta, scale=.1) rmnorm(1, mean = c(tpar$mode), varcov = matrix(tpar$var,2,2))
+
+#metropolis algorithm
+for(i in 2:sims) {
+  theta.new = jumping(theta[i-1,], .1)
+  uu = runif(1)
+  r <- min(exp(logitBin108(theta.new, dataset108) - logitBin108(theta[i-1,], dataset108)), 1)
+  if (uu < r) {
+    theta[i,] <- theta.new
+  }else{
+    theta[i,] = theta[i-1,]
+  }
+}
+
+# plots for convergence? / investigation / display
+firstChain <- c(rep(NA, sims))
+for (i in 1:sims) {
+  firstChain[i] <- exp(logitBin108(theta[i,],dataset108))
+}
+# probability
+plot(seq(1:sims),firstChain,type="l",xlab="Iteration",ylab="posterior prob",main="post convergence?")
+#alpha
+plot(seq(1:sims),theta[,1],type="l",xlab="Iteration",ylab="posterior prob",main="alpha convergence?")
+#beta
+plot(seq(1:sims),theta[,2],type="l",xlab="Iteration",ylab="posterior prob",main="beta convergence?")
+
+#samples/walks
+contour(x0, y0, Z, levels = c(seq(4.822959e-39, 2.737619e-03, length.out=10)), 
+        lwd = 1, ylab = "beta", xlab= "alpha")
+points(theta[,1],theta[,2], pch='.')
+```
+
+## 5. Chapter 11 Question 3
+```{r, 113}
+#load in data
+dataset113 <-  data.frame(machineno = rep(1:6, each=5), 
+                          ments = c(83, 92, 92, 46, 67,
+                                    117, 109, 114, 104, 87,
+                                    101, 93, 92, 86, 67,
+                                    105, 119, 116, 102, 116,
+                                    79, 97, 103, 79, 92,
+                                    57, 92, 104, 77, 100))
+J <- length(unique(dataset113$machineno))
+n <- length(dataset113$ments)
+
+#starting points
+# from text "obtain 10 starting points for the simulations by drawing thetaj independently in this way for each group"
+
+set.seed(142857)
+theta.start <- sapply(1:6,function(x) sample(dataset113$ments[dataset113$machineno==x], 10, replace=TRUE))
+mu.start <- apply(theta.start, 2, mean)
+sigma.start <- sqrt(apply(theta.start, 2, var))
+
+# ____________________________________________________________________________________________________________________
+
+#heirarchical model functions
+#tau (step 4)
+tau.post.sample <- function(theta) {
+  #first find tau hat
+  tau.hat.func <- function(theta) {
+    mu <- mean(theta)
+    tau.hat <- (1/(J-1)) * sum((theta-mu)^2)
+    return(tau.hat)
+  }
+  #next find conditional tau
+  tau.hat <- tau.hat.func(theta) 
+  tau.cond <- rinvchisq(1,J-1,tau.hat)
+  return(tau.cond)
+}
+#sigma (step 3)
+sigma.post.sample <-  function(theta) {
+  #first find sigma hat
+  sigma.hat.func <- function(theta) {
+    sigma.hat <- sapply(1:6, function(x) (dataset113$ments[dataset113$machineno==x] - theta[x])^2)  
+    sigma.hat <- (1/n) * sum(unlist(sigma.hat))
+    return(sigma.hat)
+  }
+  #next find conditional sigma
+  sigma.hat <- sigma.hat.func(theta) 
+  sigma.cond <- rinvchisq(1,n,sigma.hat)
+  return(sigma.cond)
+}
+
+#mu (step 2)
+mu.post.sample <- function(theta,tau) {
+  #first find mu hat
+  mu.hat <- mean(theta)
+  #next find conditional mu
+  mu.cond <- rnorm(1,mu.hat,sqrt(tau/J))
+  return(mu.cond)
+}
+
+#theta (step 1)
+theta.post.sample <- function(mu,sigma,tau){
+  theta <- NULL
+  for(j in 1:J)	{
+    n.j  <- length(dataset113$ments[dataset113$machineno==j])
+    y.bar.j <- mean(dataset113$ments[dataset113$machineno==j])
+    #first find V hat
+    V.hat <- 1 / ((n.j/sigma)+(1/tau))
+    #next find theta hat
+    theta.hat <- (((y.bar.j*n.j)/sigma) + (mu/tau)) * V.hat
+    #last find conditional theta
+    theta[j] <- rnorm(1,theta.hat,sqrt(V.hat))
+  }
+  return(theta)
+}
+
+# ____________________________________________________________________________________________________________________
+
+#gibbs sampler function
+sims <- 200
+
+gibbs.sampler <- function(sample.i) {
+  #initializations
+  no.params <- 9
+  param.storage <- matrix(NA, sims, no.params)
+  colnames(param.storage) <- c("theta1", "theta2", "theta3", "theta4", "theta5", "theta6", 
+                               "mu", "sigma2", "tau2")
+  #starting values for theta, tau, sigma and mu
+  param.storage[1,1:6] <- sample.i
+  param.storage[1,9] <- tau.post.sample(sample.i)
+  param.storage[1,8] <- sigma.post.sample(sample.i)
+  param.storage[1,7] <- mu.post.sample(sample.i,param.storage[1,9])#param.storage[1,9])
+  
+  #interations
+  for (i in 2:sims) {
+    param.storage[i,1:6] <- theta.post.sample(param.storage[i-1,7], param.storage[i-1,8], param.storage[i-1,9])
+    param.storage[i,9] <- tau.post.sample(param.storage[i,1:6])
+    param.storage[i,8] <- sigma.post.sample(param.storage[i,1:6])
+    param.storage[i,7] <- mu.post.sample(param.storage[i,1:6], param.storage[i,9])
+  }
+return(param.storage)
+}
+  
+#run sampler!
+param.storage <- gibbs.sampler(mu.start)
+#snag output (second halves as directed in text)
+gibbs.output <- param.storage[seq(sims/2+1, sims, 1),]
+gibbs.output[,8:9] <- sqrt(gibbs.output[,8:9])
+
+#summary table
+t(apply(gibbs.output, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975))))
+
+# ____________________________________________________________________________________________________________________
+
+#measures for theta 6 & grand.mean for seperate model
+y.bar.6.dot <- mean(dataset113$ments[dataset113$machineno==6]) 
+var.sep.6 <- var(dataset113$ments[dataset113$machineno==6])
+theta.sep.6 <- rnorm(sims, y.bar.6.dot, sqrt(var.sep.6))
+
+theta.sep.7 <- mean(dataset113$ments)
+
+#measures for theta 6 & grand.mean for pooled model
+y.bar.dot.dot <- mean(dataset113$ments)
+var.pooled <- sum((dataset113$ments[dataset113$machineno==6] - mean(dataset113$ments))^2) / 
+  (length(dataset113$ments) - 1)
+theta.pooled.6 <- rnorm(sims, y.bar.dot.dot, sqrt(var.pooled))
+
+
+# ____________________________________________________________________________________________________________________
+
+
+# posterior distribution of the mean of the quality measurements of the sixth machine
+plot(density(gibbs.output[,"theta6"]), col="red", 
+     xlab="Mean Measure", 
+     ylab="Density", 
+     main="Mean of Machine 6")
+lines(density(theta.pooled.6[seq(sims/2+1, sims, 1)]), col="blue")
+lines(density(theta.sep.6[seq(sims/2+1, sims, 1)]), col="green")
+legend("topright",col = c("red","blue", "green"),
+       legend=c("hierarchical","pooled", "separated"),
+       lty = c(1,1,1))
+
+# predictive distribution for another quality measurement of the sixth machine (maximum?)
+plot(density(gibbs.output[,"theta6"]), col="red", 
+     xlab="Mean Measure", 
+     ylab="Density", 
+     main="Mean of Machine 6")
+lines(density(theta.pooled.6[seq(sims/2+1, sims, 1)]), col="blue")
+lines(density(theta.sep.6[seq(sims/2+1, sims, 1)]), col="green")
+lines(x=c(y.bar.6.dot,y.bar.6.dot),y=c(-1,1), col="black")
+legend("topright",col = c("red","blue", "green"),
+       legend=c("hierarchical","pooled", "separated"),
+       lty = c(1,1,1))
+
+# posterior distribution of the mean of the quality measurements of the potential seventh machine
+plot(density(gibbs.output[,"mu"]), col="red", xlab="Mean Measure", 
+    ylab="Density", main="Mean of Potential Machine 7")
+lines(density(theta.pooled.6[seq(sims/2+1, sims, 1)]), col="blue")
+lines(density(theta.sep.6[seq(sims/2+1, sims, 1)]), col="green")
+legend("topright",col = c("red","blue", "green"), 
+       legend=c("hierarchical","pooled", "separated"), 
+       lty = c(1,1,1)) 
+```
+
+
+## 6. Chapter 11 Question 4
+```{r, 114}
+#heirarchical model functions
+#tau (step 4)
+tau.post.sample <- function(theta) {
+  #first find tau hat
+  tau.hat.func <- function(theta) {
+    mu <- mean(theta)
+    tau.hat <- (1/(J-1)) * sum((theta-mu)^2)
+    return(tau.hat)
+  }
+  #next find conditional tau
+  tau.hat <- tau.hat.func(theta) 
+  tau.cond <- rinvchisq(1,J-1,tau.hat)
+  return(tau.cond)
+}
+
+# change sigma function
+
+sigma.post.sample.p2 <- function(theta) {
+  for(j in 1:J)	{
+  #first find sigma0
+  sigma.0 <- seq(0.01, 30, 0.25) 
+  sigma.0.probs <- dinvchisq(1,1,sigma.0)
+  sigma.cond <- rinvchisq(1,1,sample(sigma.0, 1, prob=sigma.0.probs))
+  }
+  return(sigma.cond)
+}
+
+sigma.post.sample <- function(theta) {
+  #first find sigma hat
+  sigma.hat.func <- function(theta) {
+    sigma.hat <- sapply(1:6, function(x) (dataset113$ments[dataset113$machineno==x] - theta[x])^2)  
+    sigma.hat <- (1/n) * sum(unlist(sigma.hat))
+    return(sigma.hat)
+  }
+  #next find conditional sigma
+  sigma.hat <- sigma.hat.func(theta) 
+  sigma.cond <- rinvchisq(1,n,sigma.hat)
+  return(sigma.cond)
+}
+
+#mu (step 2)
+mu.post.sample <- function(theta,tau) {
+  #first find mu hat
+  mu.hat <- mean(theta)
+  #next find conditional mu
+  mu.cond <- rnorm(1,mu.hat,sqrt(tau/J))
+  return(mu.cond)
+}
+
+#theta (step 1)
+theta.post.sample <- function(mu,sigma,tau){
+  theta <- NULL
+  for(j in 1:J)	{
+    n.j  <- length(dataset113$ments[dataset113$machineno==j])
+    y.bar.j <- mean(dataset113$ments[dataset113$machineno==j])
+    #first find V hat
+    V.hat <- 1 / ((n.j/sigma[j])+(1/tau))
+    #next find theta hat
+    theta.hat <- (((y.bar.j*n.j)/sigma[j]) + (mu/tau)) * V.hat
+    #last find conditional theta
+    theta[j] <- rnorm(1,theta.hat,sqrt(V.hat))
+  }
+  return(theta)
+}
+
+# ____________________________________________________________________________________________________________________
+
+#gibbs sampler function
+sims <- 200
+
+gibbs.sampler <- function(sample.i) {
+  #initializations
+  no.params <- 14
+  param.storage <- matrix(NA, sims, no.params)
+  colnames(param.storage) <- c("theta1", "theta2", "theta3", "theta4", "theta5", "theta6",
+                               "sigma1", "sigma2", "sigma3", "sigma4", "sigma5", "sigma6",
+                               "tau2","mu")
+  #starting values for theta, tau, sigma and mu
+  param.storage[1,1:6] <- sample.i
+  param.storage[1,7:12] <- sigma.post.sample.p2(sample.i)
+  param.storage[1,13] <- tau.post.sample(sample.i)
+  param.storage[1,14] <- mu.post.sample(sample.i,param.storage[1,9])
+  
+  #interations
+  for (i in 2:sims) {
+    param.storage[i,1:6] <- theta.post.sample(param.storage[i-1,14], param.storage[i-1,7:12], param.storage[i-1,13])
+    param.storage[i,7:12] <- sigma.post.sample.p2(param.storage[i,1:6])
+    param.storage[i,13] <- tau.post.sample(param.storage[i,1:6])
+    param.storage[i,14] <- mu.post.sample(param.storage[i,1:6], param.storage[i,9])
+  }
+return(param.storage)
+}
+  
+#run sampler!
+param.storage <- gibbs.sampler(mu.start)
+#snag output (second halves as directed in text)
+gibbs.output <- param.storage[seq(sims/2+1, sims, 1),]
+gibbs.output[,7:13] <- sqrt(gibbs.output[,7:13])
+
+#summary table
+t(apply(gibbs.output, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975))))
+
+```
+
+
+## 7. Chapter 13 Question 5
+Estimating the number of unseen species (see Fisher, Corbet, and Williams, 1943, Efron and Thisted, 1976, and Seber, 1992): suppose that during an animal trapping expedition the number of times an animal from species i is caught is xi ∼ Poisson(λi). For parts (a)–(d) of this problem, assume a Gamma(α,β) prior distribution for the λi’s, with a uniform hyperprior distribution on (α,β). The only observed data are yk, the number of species observed exactly k times during a trapping expedition, for k = 1, 2, 3, . . .
+
+#### Part A
+Write the distribution p(xi|α,β).
+
+#### Part B
+Use the distribution of xi to derive a multinomial distribution for y given that there are a total of N species.
+
+#### Part C
+Suppose that we are given y = (118, 74, 44, 24, 29, 22, 20, 14, 20, 15, 12, 14, 6, 12, 6, 9, 9, 6, 10, 10, 11, 5, 3, 3), so that 118 species were observed only once, 74 species were observed twice, and so forth, with a total of 496 species observed and 3266 animals caught. Write down the likelihood for y using the multinomial distribution with 24 cells (ignoring unseen species). Use any method to find the mode of α,β and an approximate second derivative matrix.
+
+#### Part D
+Derive an estimate and approximate 95% posterior interval for the number of additional species that would be observed if 10,000 more animals were caught.
+
+#### Part E
+Evaluate the fit of the model to the data using appropriate posterior predictive checks.
+
+#### Part F
+Discuss the sensitivity of the inference in (d) to each of the model assumptions.
+
+
+
+
+
+
+
+
+## 8. Generate / simulate n = 120 observations from a three component mixture 
+
+```{r, Prep}
+set.seed(100)
+#investigate model and pull 120 observations as directed
+y <- seq(-50,50,0.1)
+#dens <- function (x, theta, stnd){dnorm (x, theta, sqrt(1000*theta*(1-theta)))}
+dens.mix <- 0.1*dnorm(y,0,1) + 0.3*dnorm(y,-2,2) + 0.6*dnorm(y,3,16)
+plot (y, dens.mix, ylim=c(0,1.1*max(dens.mix)),
+      type="l", xlab="y", ylab="", xaxs="i",
+      yaxs="i", yaxt="n", bty="n", cex=2)
+
+vals.mix <- c(rnorm(120*0.1,0,1), rnorm(120*0.3,-2,2), rnorm(0.6*120,3,16))
+labels <- c(rep(1, 12), rep(2, 36), rep(3, 72))
+vals.mix <- data.frame(cbind(vals.mix, labels))
+
+#use k means to initialize
+vals.kmeans <- kmeans(vals.mix$vals.mix, 3) 
+vals.kmeans.cluster <- vals.kmeans$cluster
+vals.df <- data.frame(x = vals.mix$vals.mix, 
+                      cluster = vals.kmeans.cluster)
+
+vals.df %>%
+  mutate(num = row_number()) %>%
+  ggplot(aes(y = num, x = x, color = factor(cluster))) +
+  geom_point() +
+  ylab("Values") +
+  ylab("Data Point Number") +
+  scale_color_discrete(name = "Cluster") +
+  ggtitle("K-means Clustering")
+
+vals.summary.df <- vals.df %>%
+  group_by(cluster) %>%
+  summarize(mu = mean(x), variance = var(x), std = sd(x), size = n()) %>%
+  mutate(p = size / sum(size))
+```
+
+#### Part A
+```{r, 8A}
+#e step
+e_step <- function(x, mu.vector, sd.vector, p.vector) {
+  comp1.prod <- dnorm(x, mu.vector[1], sd.vector[1]) * p.vector[1]
+  comp2.prod <- dnorm(x, mu.vector[2], sd.vector[2]) * p.vector[2]
+  comp3.prod <- dnorm(x, mu.vector[3], sd.vector[3]) * p.vector[3]
+  sum.of.comps <- comp1.prod + comp2.prod + comp3.prod
+  comp1.post <- comp1.prod / sum.of.comps
+  comp2.post <- comp2.prod / sum.of.comps
+  comp3.post <- comp3.prod / sum.of.comps
+
+  sum.of.comps.log.sum <- sum(log(sum.of.comps))
+
+  list("loglik" = sum.of.comps.log.sum,
+       "posterior.df" = cbind(comp1.post, comp2.post, comp3.post))
+}
+
+#m step
+m_step <- function(x, posterior.df) {
+  comp1.n <- sum(posterior.df[,1])
+  comp2.n <- sum(posterior.df[,2])
+  comp3.n <- sum(posterior.df[,3])
+  
+  comp1.mu <- 1/comp1.n * sum(posterior.df[,1] * x)
+  comp2.mu <- 1/comp2.n * sum(posterior.df[,2] * x)
+  comp3.mu <- 1/comp3.n * sum(posterior.df[,3] * x)
+
+  comp1.var <- sum(posterior.df[,1] * (x - comp1.mu)^2) * 1/comp1.n
+  comp2.var <- sum(posterior.df[,2] * (x - comp2.mu)^2) * 1/comp2.n
+  comp3.var <- sum(posterior.df[,3] * (x - comp3.mu)^2) * 1/comp3.n
+
+  comp1.p <- comp1.n / length(x)
+  comp2.p <- comp2.n / length(x)
+  comp3.p <- comp3.n / length(x)
+  
+  list("mu" = c(comp1.mu, comp2.mu, comp3.mu),
+       "var" = c(comp1.var, comp2.var, comp3.var),
+       "p" = c(comp1.p, comp2.p, comp3.p))
+}
+
+#loop function
+for (i in 1:2000) {
+  if (i == 1) {
+    # Initialization
+    e.step <- e_step(vals.mix$vals.mix, 
+                     vals.summary.df[["mu"]], 
+                     vals.summary.df[["std"]],
+                     vals.summary.df[["p"]])
+    m.step <- m_step(vals.mix$vals.mix, 
+                     e.step[["posterior.df"]])
+    cur.loglik <- e.step[["loglik"]]
+    loglik.vector <- e.step[["loglik"]]
+    
+  } else {
+    # Repeat E and M steps till convergence
+    e.step <- e_step(vals.mix$vals.mix, m.step[["mu"]], 
+                     sqrt(m.step[["var"]]), 
+                     m.step[["p"]])
+    m.step <- m_step(vals.mix$vals.mix, 
+                     e.step[["posterior.df"]])
+    loglik.vector <- c(loglik.vector, 
+                       e.step[["loglik"]])
+    loglik.diff <- abs((cur.loglik - e.step[["loglik"]]))
+    if(loglik.diff < 1e-6) {
+      break
+    } else {
+      cur.loglik <- e.step[["loglik"]]
+    }
+  }
+}
+
+loglik.vector
+m.step
+
+plot_mix_comps <- function(x, mu, sigma, lam) {
+  lam * dnorm(x, mu, sigma)
+}
+
+data.frame(x = vals.mix$vals.mix) %>%
+  ggplot() +
+  geom_histogram(aes(x, ..density..), binwidth = 1, colour = "black", 
+                 fill = "white") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(m.step$mu[1], sqrt(m.step$var[1]), 
+                           lam = m.step$p[1]),
+                colour = "red", lwd = 1.5) +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(m.step$mu[2], sqrt(m.step$var[2]), 
+                            lam = m.step$p[2]),
+                colour = "blue", lwd = 1.5) +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(m.step$mu[3], sqrt(m.step$var[3]), 
+                            lam = m.step$p[3]),
+                colour = "green", lwd = 1.5) +
+  ylab("Density") +
+  xlab("Values") +
+  ggtitle("Final GMM Fit")
+```
+
+#### Part B
+```{r, 8B}
+# mixed gaussian model functions
+
+normalize = function(x){return(x/sum(x))}
+
+sample_z = function(x,pi,mu){
+  dmat = outer(mu,x,"-") # k by n matrix, d_kj =(mu_k - x_j)
+  p.z.given.x = as.vector(pi) * dnorm(dmat,0,1) 
+  p.z.given.x = apply(p.z.given.x,2,normalize) # normalize columns
+  z = rep(0, length(x))
+  for(i in 1:length(z)){
+    z[i] = sample(1:length(pi), size=1,prob=p.z.given.x[,i],replace=TRUE)
+  }
+  return(z)
+}
+
+sample.pi.post = function(z,k) {
+  counts = colSums(outer(z,1:k,FUN="=="))
+  pi = rdirichlet(1,counts+1)
+  return(pi)
+}
+
+sample_mu = function(x, z, k, prior){
+  df = data.frame(x=x,z=z)
+  mu = rep(0,k)
+  for(i in 1:k){
+    sample.size = sum(z==i)
+    sample.mean = ifelse(sample.size==0,0,mean(x[z==i]))
+    
+    post.prec = sample.size+prior$prec
+    post.mean = (prior$mean * prior$prec + sample.mean * sample.size)/post.prec
+    mu[i] = rnorm(1,post.mean,sqrt(1/post.prec))
+  }
+  return(mu)
+}
+
+#gibbs sampler function
+sims <- 1000
+
+gibbs.sampler.8 <- function(x, k, muprior = list(mean=0,prec=0.1)) {
+  #initializations
+  no.params <- 9
+  param.storage <- matrix(NA, nrow=sims, ncol=no.params)
+  colnames(param.storage) <- c("mu1", "mu2", "mu3",
+                               "sigma1", "sigma2", "sigma3",
+                               "p1", "p2", "p3")
+  z.storage <- matrix(NA, nrow=sims, ncol=length(vals.mix$vals.mix))
+  
+  #starting values for theta, tau, sigma and mu (calculated from our sample build earlier, theta.start)
+  param.storage[1,1:3] <- vals.summary.df$mu
+  param.storage[1,4:6] <- vals.summary.df$variance
+  param.storage[1,7:9] <- vals.summary.df$p
+  z.storage[1,] <- vals.kmeans.cluster
+  
+  #interations
+  for (i in 2:sims) {
+    z.storage[i,] = sample_z(x,param.storage[i-1,7:9],param.storage[i-1,1:3])
+    param.storage[i,7:9] = sample.pi.post(z.storage[i,],k)
+    param.storage[i,1:3] = sample_mu(x,z.storage[i,],k,muprior)
+  }
+return(param.storage)
+}
+
+gibbs.output.8 <- data.frame(gibbs.sampler.8(vals.mix$vals.mix, 3))
+#gibbs.output.8 <- gibbs.output.8[800:1000,]
+
+plot(gibbs.output.8$mu1,ylim=c(-30,30),type="l")
+lines(gibbs.output.8$mu2,col=2)
+lines(gibbs.output.8$mu3,col=3)
+
+#summary table
+t(apply(gibbs.output.8, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975),na.rm = T)))
+
+
+data.frame(x = vals.mix$vals.mix) %>%
+  ggplot() +
+  geom_histogram(aes(x, ..density..), binwidth = 1, colour = "black", 
+                 fill = "white") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(m.step$mu[1], sqrt(m.step$var[1]), 
+                           lam = m.step$p[1]),
+                colour = "red", lwd = 1.5) +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(m.step$mu[2], sqrt(m.step$var[2]), 
+                            lam = m.step$p[2]),
+                colour = "blue", lwd = 1.5) +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(m.step$mu[3], sqrt(m.step$var[3]), 
+                            lam = m.step$p[3]),
+                colour = "green", lwd = 1.5) +
+  ylab("Density") +
+  xlab("Values") +
+  ggtitle("Final GMM Fit")
+
+```
+
+#### Part C
+Compare the two.
+
+
+
+
+
+
+
+
+## 9. Chapter 15 question 3
+Regression with many explanatory variables: Table 15.2 displays data from a designed experiment for a chemical process. In using these data to illustrate various approaches to selection and estimation of regression coefficients, Marquardt and Snee (1975) assume a quadratic regression form; that is, a linear relation between the expectation of the untransformed outcome, y, and the variables x1,x2,x3, their two-way interactions, x1x2, x1x3, x2x3, and their squares, x21, x2, x23.
+
+#### Part A
+Fit an ordinary linear regression model (that is, nonhierarchical with a uniform prior distribution on the coefficients), including a constant term and the nine explanatory variables above.
+
+```{r, 153PartA}
+#load data
+dataset153 <- data.frame(c(1300, 1300, 1300, 1300, 1300, 1300, 1200, 1200, 1200, 1200, 1200, 1200, 1100, 1100, 1100, 1100),
+                         c(7.5, 9.0, 11.0, 13.5, 17.0, 23.0, 5.3, 7.5, 11.0, 13.5, 17.0, 23.0, 5.3, 7.5, 11.0, 17.0),
+                         c(0.0120, 0.0120, 0.0115, 0.0130, 0.0135, 0.0120, 0.0400, 0.0380, 0.0320, 0.0260, 0.0340, 0.0410, 
+                           0.0840, 0.0980, 0.0920, 0.0860),
+                         c(49.0, 50.2, 50.5, 48.5, 47.5, 44.5, 28.0, 31.5, 34.5, 35.0, 38.0, 38.5, 15.0, 17.0, 20.5, 19.5))
+colnames(dataset153) <- c("x1", "x2", "x3", "y")
+
+#build model as instructed
+library(MCMCpack)
+part.a.mod <- lm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + poly(x1,2) + poly(x2,2) + poly(x3,2), data = dataset153)
+part.a.mod2 <- MCMCregress(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), data = dataset153, 1000, 10000)
+summary(part.a.mod2)
+#plot(part.a.mod)
+
+#model output
+output <- summary(part.a.mod)$coef[, 1:2]
+out <- cbind(output, confint(part.a.mod)[c(1:4,6,8,10:13),])
+colnames(out) <- c("posterior mean", "posterior std", "2.5", "97.5")
+round(out, 2)
+```
+
+#### Part B
+Fit a mixed-effects linear regression model with a uniform prior distribution on the constant term and a shared normal prior distribution on the coefficients of the nine variables above. If you use iterative simulation in your computations, be sure to use multiple sequences and monitor their joint convergence.
+
+```{r, 153PartB}
+
+```
+
+#### Part C
+Discuss the differences between the inferences in (a) and (b). Interpret the differences in terms of the hierarchical variance parameter. Do you agree with Marquardt and Snee that the inferences from (a) are unacceptable?
+
+#### Part D
+Repeat (a), but with a t4 prior distribution on the nine variables.
+
+```{r, 153PartD}
+library(rjags)
+library(R2jags)
+
+lm1jags <- function () {
+  #likelihood
+  for (i in 1:n) {
+    y[i] ~ dnorm(mu[i], inv.var)
+    mu[i] <- beta[1] + beta[2]*x1[i] + beta[3]*x2[i] + beta[4]*x3[i]
+  }
+  #prior for beta
+  for (j in 1:4) {
+    beta[j] ~ 1#dunif(1) dnorm(0,0.00001)
+  }
+  #prior for inverse variance
+  inv.var = 1/(sigma^2)
+  sigma ~ dunif(0,100)
+}
+
+data.153.vjags <- list(
+  x1=(dataset153$x1),
+  x2=(dataset153$x2),
+  x3=(dataset153$x3),
+  n=length(dataset153$x3)
+)
+
+inits = function () {
+  betaVec = rnorm(4,0,5)
+  sigmaVal = runif(1);
+  return(list(beta=betaVec, sigma=sigmaVal))
+}
+
+parameters = c("beta", "sigma")
+model <- jags(model.file = lm1jags,
+              data=dataExtinct,
+              #inits=inits,
+              parameters.to.save = parameters)
+```
+
+#### Part E
+Discuss other models for the regression coefficients.
+
+
+
+# Code Appendix
+
+```{r, ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
