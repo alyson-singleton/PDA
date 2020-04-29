@@ -182,15 +182,17 @@ plot(effSSize, ylim = c(0, 5000), type = "l", xlab = "Rejection control constant
 ```
 
 
+
 ## 2. Chapter 10 Question 5
 #### Part A
 Indeed, we are given the structure of the model from the problem statement. The information we have is as follows, where $J=10$:
 $$p(y_j|\theta_j) \sim \text{Bin}(n_j,\theta_j), \text{ i.e.   } p(y|\theta,\alpha,\beta) = \prod_{j=1}^{10}{n_j \choose y_i}\theta_j^{y_i}(1-\theta_j)^{n_j-y_i}$$
 $$p(\theta_j) \sim \text{logit}^{-1}(\alpha+\beta x_j)$$
-$$\alpha ∼ t_4(0, 2^2) \text{ and } \beta ∼ t_4(0, 1^2)$$
-$$x_j ∼ U(0, 1) \text{ and } n_j ∼ \text{Poiss}(5)$$
+$$\alpha \sim t_4(0, 2^2) \text{ and } \beta \sim t_4(0, 1^2)$$
+$$x_j \sim U(0, 1) \text{ and } n_j \sim \text{Poiss}(5)$$
 I build the dataset of 10 samples from this model as directed (Table 1).
 ```{r, 10.5A}
+###10.5A
 #build random dataset from the model
 yis <- c(rep(NA, 10))
 nis <- c(rep(NA, 10))
@@ -227,11 +229,14 @@ kable_styling(latex_options = c("striped", "hold_position"))
 Next, I used rejection sampling to acquire to get 1000 independent posterior draws from $(\alpha, \beta)$. The likelihood follows:
 $$p(\alpha,\beta|y,n,x) \propto p(\alpha,\beta)\prod_{i=1}^k p(y_i|\alpha,\beta,n_i,x_i)$$
 $$p(\alpha,\beta|y,n,x) \propto p(\alpha,\beta) \prod_{i=1}^k [\text{logit}^{-1}(\alpha+\beta x_i)]^{y_i}[1-\text{logit}^{-1}(\alpha+\beta x_i)]^{n_i-y_i}$$
-Notably, 
+For simplitcity's sake we will let the prior distribution equal the inverse of the normalization constants (is this what you said, Jerson? I can't quite remember if this was what you recommended for forgoeing the specification of a prior but I can't think of what else you might have said...). Given that we also have no knowledge that would given us reason to choose a particular prior, this is as appropriate a choice as any. Therefore, I calculated the posterior as follows:
+$$q(\alpha,\beta|y,n,x) \propto \prod_{i=1}^k [\text{logit}^{-1}(\alpha+\beta x_i)]^{y_i}[1-\text{logit}^{-1}(\alpha+\beta x_i)]^{n_i-y_i}$$
+
 
 First, I display the contours of the joint posterior distribution of $(\alpha, \beta)$ for your reference. The following plot shows the draws from the rejection sampling.
 
 ```{r, 10.5B}
+###10.5B
 library(LearnBayes)
 #posterior function
 logitBin = function (theta, data)
@@ -266,8 +271,7 @@ contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2,
 ####Rejection sampling
 #find the mode
 tpar=LearnBayes::laplace(logitBin,array(c(3,1),c(1,2)),data=dataset)
-logitBinT=function(theta,data,tpar)
-{
+logitBinT=function(theta,data,tpar) {
 	data=data
 	d=logitBin(theta,data)-dmt(theta,mean=c(tpar$mode), S=2*tpar$var,df=4,
 	log=TRUE)
@@ -275,7 +279,7 @@ logitBinT=function(theta,data,tpar)
 }
 
 start=array(c(3,1),c(1,2))
-fit1=LearnBayes::laplace(logitBinT,start,data=dataset, tpar=tpar)
+fit1=LearnBayes::laplace(logitBinT, start, data=dataset, tpar=tpar)
 #logitBinT(fit1$mode,dataset,tpar)
 
 rejectsamp=function(logf,tpar,dmax,n,data){
@@ -301,6 +305,7 @@ points(theta[,1],theta[,2])
 Here we use the Laplace function to estimate the approximate the posterior density for $(\alpha,\beta)$ with a normal centered at the posterior mode with covariance matrix fit to the curvature at the mode. See below for the estimates:
 
 ```{r, 10.5C}
+###10.5C
 # build normal approximation
 tpar=LearnBayes::laplace(logitBin,array(c(-1,1),c(1,2)),data=dataset)
 logitBinT=function(theta,data,tpar) {
@@ -326,9 +331,10 @@ kable_styling(latex_options = c("striped", "hold_position"))
 ```
 
 #### Part D
-Using the calculated posterior mode and covariance matrix to build two-dimensional $t_4$ distributions, I employed importance sampling to estimate $E(alpha|y)$ and $E(\beta|y)$. First, see the samples displayed on the contour plot. The table below that displayes the distribution of the estimates for $(\alpha,\beta)$. The means of the 1,000 samples were calculated as 0.205 for $\alpha$ and -2.01 for $\beta$.
+Using the calculated posterior mode and covariance matrix to build two-dimensional $t_4$ distributions, I employed importance sampling to estimate $E(\alpha|y)$ and $E(\beta|y)$. First, see the samples displayed on the contour plot. The table below that displayes the distribution of the estimates for $(\alpha,\beta)$. The means of the 1,000 samples were calculated as 0.205 for $\alpha$ and -2.01 for $\beta$.
 
 ```{r, 10.5D}
+###10.5D
 ##importance sampling using normal centered at the posterior mode with covariance 
     #matrix fit to the curvature at the mode
 theta = rmt(1000, mean = c(tpar$mode), S = tpar$var, df = 4)
@@ -357,6 +363,7 @@ kable_styling(latex_options = c("striped", "hold_position"))
 I calculated the effective sample size to be 1.63. Given it's small size this would lead me to believe that there are likely a few extremely high weights which might be unduly influencing the distribution.
 
 ```{r, 10.5E}
+###10.5E
 normalize = function(x){return(x/sum(x))}
 seff <- 1/sum(normalize(wt)^2)
 #seff <- length(wt)/(1 + var(wt))
@@ -367,9 +374,10 @@ seff <- 1/sum(normalize(wt)^2)
 ## 3. Chapter 10 Question 8
 #### Part A
 
-First, I set out to recreate the approximate posterior distribution of the bioassay example in Section 3.7. My first plot below is my recreation of Figure 3.3b to confirm that I am recreating the distribution correctly. After sampling 10,000 from the approximate distribution, I resampled without replacement $k = 1000$ samples. The plot of those draws are shown on the next plot.
+First, I set out to recreate the approximate posterior distribution of the bioassay example in Section 3.7. The model has the same structure as was written out for Problem 10.7. I will forgoe re-writing it here. My first plot below is my recreation of Figure 3.3b to confirm that I am recreating the distribution correctly. After sampling 10,000 from the approximate distribution, I resampled without replacement $k = 1000$ samples. The plot of those draws are shown on the next plot.
 
 ```{r, 108A}
+###10.8A
 # load data
 x108 <- c(-0.86,-0.30,-0.05,0.74) 
 n108 <- rep(5,length(x108))
@@ -441,6 +449,7 @@ points(theta.S[,1],theta.S[,2], pch='.')
 See below for my first attempt at displaying the distribution of the simulated importance ratios. 
 
 ```{r}
+###10.8B
 hist(wt, main="Distribution of the Simulated Importance Ratios",
      xlab="Simulated Importance Ratios with Outliers")
 ```
@@ -462,6 +471,7 @@ hist(wt, main="Distribution of the Simulated Importance Ratios",
 Below I display the results from doing importance resampling with replacement. There does not appear to be much difference between the samples drawn when replacing that in Part A where there was none. This is an indicator that the importance weights are moderate, whichi is in line with what we saw in Part B. In situations like these, it would make sense that sampling with and without replacement gives similar results (as compared to a situation where there are a few large weights and many small weights and sampling with replacement would pick the same few values repeatedly, leading to a different set that a more conservative without replacement approach).
 
 ```{r, 108C}
+###10.8C
 #importance resampling SIR WITH replacement
 theta = rmt(10000, mean = c(tpar$mode), S = tpar$var, df = 4)
 lf = apply(theta,1,logitBin108,data=dataset108)
@@ -484,18 +494,38 @@ points(theta.S[,1],theta.S[,2], pch='.')
 
 
 ## 4. Chapter 11 Question 2
+Following up on questions 10.7 and 10.8, this problem encourages us to try sampling using the the Metropolis algorithm. First, I defined my starting points and my jumping rule. I used a normal approximation to construct estimates for these parameters (Table 5).
+
+
 ```{r, 112}
+###11.2
 #initializations
-sims <- 10000
+sims <- 1000
 theta <-  matrix(0, nrow = sims, ncol = 2) 
 r.all <- rep(0,sims) 
 
 #starting positions found from normal approximation
 theta[1,] <- c(0.847,7.749)
 
+dataset.df11.2.1 <- t(data.frame(theta[1,]))
+colnames(dataset.df11.2.1) <- c("alpha", "beta")
+rownames(dataset.df11.2.1) <- c("")
+kable(dataset.df11.2.1, "latex", caption = "Estimated Modes", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+
 #jumping function
 jumping <- function(theta, scale=.1) rmnorm(1, mean = c(tpar$mode), varcov = matrix(tpar$var,2,2))
 
+dataset.df11.2.2 <- data.frame(matrix(tpar$var,2,2))
+colnames(dataset.df11.2.2) <- c("alpha", "beta")
+rownames(dataset.df11.2.2) <- c("alpha", "beta")
+kable(dataset.df11.2.2, "latex", caption = "Estimated Covariance Matrix", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+Now, we use the metropolis algorithm to pull a set of samples. These samples are displayed below. They seem to be an improvement over the importance sampling attempts.
+
+```{r, 1121}
 #metropolis algorithm
 for(i in 2:sims) {
   theta.new = jumping(theta[i-1,], .1)
@@ -508,26 +538,39 @@ for(i in 2:sims) {
   }
 }
 
+#samples/walks
+contour(x0, y0, Z, levels = c(seq(4.822959e-39, 2.737619e-03, length.out=10)), 
+        lwd = 1, ylab = "beta", xlab= "alpha",
+        drawlabels = F)
+points(theta[,1],theta[,2], pch='.')
+```
+
+Lastly, we are instructed to check if we have approximated convergence. Below I display the values of alpha and beta as we progress through the iterations. It doesn't appear to me that they are converging to the means as we might hope. I wonder if I have coded something wrong, or if this is simply the best that this method can do?
+
+```{r, 1122}
 # plots for convergence? / investigation / display
 firstChain <- c(rep(NA, sims))
 for (i in 1:sims) {
   firstChain[i] <- exp(logitBin108(theta[i,],dataset108))
 }
 # probability
-plot(seq(1:sims),firstChain,type="l",xlab="Iteration",ylab="posterior prob",main="post convergence?")
+#plot(seq(1:sims),firstChain,type="l",xlab="Iteration",
+    #ylab="posterior prob",main="post convergence?")
 #alpha
-plot(seq(1:sims),theta[,1],type="l",xlab="Iteration",ylab="posterior prob",main="alpha convergence?")
+plot(seq(1:sims),theta[,1],type="l",xlab="Iteration",
+     ylab="Sampled Alpha",main="Alpha Convergence")
 #beta
-plot(seq(1:sims),theta[,2],type="l",xlab="Iteration",ylab="posterior prob",main="beta convergence?")
-
-#samples/walks
-contour(x0, y0, Z, levels = c(seq(4.822959e-39, 2.737619e-03, length.out=10)), 
-        lwd = 1, ylab = "beta", xlab= "alpha")
-points(theta[,1],theta[,2], pch='.')
+plot(seq(1:sims),theta[,2],type="l",xlab="Iteration",
+     ylab="Sampled Beta",main="Beta Convergence")
 ```
 
+
 ## 5. Chapter 11 Question 3
+
+The question asks us to compare the results from using three types of models on the given data: the hierarchical normal model, the seperate model, and the pooled model. To construct the hierarchical model I used the given conditional densities in the BDA3 text (equations 11.9-11.7). I will not re-write them here to save time, but they are coded out very clearly in the code appendix. The distributions of the output from the hierarchical model are displayed below. I see that the estimates are slightly off from what we might hope. I have combed through my code and can't seem to find what might be causing the discrepancy. I did take the time to try and code my gibbs sampler myself, it's possible that something is going slightly wrong in there?
+
 ```{r, 113}
+###11.3
 #load in data
 dataset113 <-  data.frame(machineno = rep(1:6, each=5), 
                           ments = c(83, 92, 92, 46, 67,
@@ -540,7 +583,8 @@ J <- length(unique(dataset113$machineno))
 n <- length(dataset113$ments)
 
 #starting points
-# from text "obtain 10 starting points for the simulations by drawing thetaj independently in this way for each group"
+# from text "obtain 10 starting points for the simulations by drawing thetaj 
+    #independently in this way for each group"
 
 set.seed(142857)
 theta.start <- sapply(1:6,function(x) sample(dataset113$ments[dataset113$machineno==x], 10, replace=TRUE))
@@ -636,43 +680,46 @@ gibbs.output <- param.storage[seq(sims/2+1, sims, 1),]
 gibbs.output[,8:9] <- sqrt(gibbs.output[,8:9])
 
 #summary table
-t(apply(gibbs.output, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975))))
+df.11.3.output <- data.frame(t(apply(gibbs.output, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975)))))
+colnames(df.11.3.output) <- c("2.5%", "25%", "50%", "75%", "97.5%")
+kable(df.11.3.output, "latex", caption = "Hierarchical Model Estimates", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+```
 
-# ____________________________________________________________________________________________________________________
+First, they ask us to report (i) the posterior distribution of the mean of the quality measurements of the sixth machine for each of the three models. I referred to the construction of the hierarchical distribution above. I drew from this model by drawing samples from: $N(\theta_6,|\sigma^2)$. To build the "seperate" model, I simply calculated the mean and variance of the sixth machine measurements without taking into account any of the other machine values and then used them as the parameters of the normal distribution, i.e. $N(\bar{y_{6.}},V^{sep}_6)$. Finally, to build the "pooled" model, I simply calculated the mean across all of the samples and the variance of the sixth machine measurements compared to the overall mean, i.e. $N(\bar{y_{..}},V^{pooled}_6)$. These distributions are displayed below. Notably, they appear as we might expect: the hierarchical has the highest density around the sampled mean of the sixth machine, the pooled distribution is pulled higher by the other machine values, and the seperated has the widest spread.
 
-#measures for theta 6 & grand.mean for seperate model
+```{r, pooled/sep calcs, i}
+#measures for theta 6 for seperate model
 y.bar.6.dot <- mean(dataset113$ments[dataset113$machineno==6]) 
 var.sep.6 <- var(dataset113$ments[dataset113$machineno==6])
 theta.sep.6 <- rnorm(sims, y.bar.6.dot, sqrt(var.sep.6))
 
-theta.sep.7 <- mean(dataset113$ments)
-
-#measures for theta 6 & grand.mean for pooled model
+#measures for theta 6 for pooled model
 y.bar.dot.dot <- mean(dataset113$ments)
 var.pooled <- sum((dataset113$ments[dataset113$machineno==6] - mean(dataset113$ments))^2) / 
   (length(dataset113$ments) - 1)
 theta.pooled.6 <- rnorm(sims, y.bar.dot.dot, sqrt(var.pooled))
 
-
-# ____________________________________________________________________________________________________________________
-
-
 # posterior distribution of the mean of the quality measurements of the sixth machine
 plot(density(gibbs.output[,"theta6"]), col="red", 
      xlab="Mean Measure", 
      ylab="Density", 
-     main="Mean of Machine 6")
+     main="(i) Mean of Machine 6")
 lines(density(theta.pooled.6[seq(sims/2+1, sims, 1)]), col="blue")
 lines(density(theta.sep.6[seq(sims/2+1, sims, 1)]), col="green")
 legend("topright",col = c("red","blue", "green"),
        legend=c("hierarchical","pooled", "separated"),
        lty = c(1,1,1))
+```
 
+Next, they ask us to report (ii) the predictive distribution for another quality measurement of the sixth machine. I was a bit unsure what they were asking for here, but  I decided to simply compare how each of the three models are performing by calculating p-values for a text statistic of the mean of the sixth machine. The observed values is displayed with a black line on the plot below. The p-values are displayed below the graph for your reference. They suggest that the hierarchical model and separate model will predict the mean of the sixth machine best.
+
+```{r, ii}
 # predictive distribution for another quality measurement of the sixth machine (maximum?)
 plot(density(gibbs.output[,"theta6"]), col="red", 
      xlab="Mean Measure", 
      ylab="Density", 
-     main="Mean of Machine 6")
+     main="(ii) Mean of Machine 6")
 lines(density(theta.pooled.6[seq(sims/2+1, sims, 1)]), col="blue")
 lines(density(theta.sep.6[seq(sims/2+1, sims, 1)]), col="green")
 lines(x=c(y.bar.6.dot,y.bar.6.dot),y=c(-1,1), col="black")
@@ -680,11 +727,55 @@ legend("topright",col = c("red","blue", "green"),
        legend=c("hierarchical","pooled", "separated"),
        lty = c(1,1,1))
 
+pvalmean1 <- length(which(gibbs.output[,"theta6"] > mean(y.bar.6.dot))) / 
+  length(gibbs.output[,"theta6"])
+
+pvalmean2 <- length(which(theta.pooled.6[seq(sims/2+1, sims, 1)] > mean(y.bar.6.dot))) / 
+  length(theta.pooled.6[seq(sims/2+1, sims, 1)])
+
+pvalmean3 <- length(which(theta.sep.6[seq(sims/2+1, sims, 1)] > mean(y.bar.6.dot))) / 
+  length(theta.sep.6[seq(sims/2+1, sims, 1)])
+
+df.11.3.pvals <- data.frame(pvalmean1, pvalmean2, pvalmean3)
+colnames(df.11.3.pvals) <- c("Hierarchical", "Pooled", "Seperate")
+rownames(df.11.3.pvals) <- c("P-Value")
+kable(df.11.3.pvals, "latex", caption = "Posterior Predictive Check", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+Lastly, they ask us to report (iii) the posterior distribution of the mean of the quality measurements of the seventh machine. As we are given no information about the seventh machine, such as if it shares any characteristics with one of the sixth machines in our dataset, we take a cautious approach and create distributions using the grand means of the distributions. In practice, this means we pull from the following distributions: Hierarchical: $N(\mu,\tau)$, Pooled: $N(\bar{y}_{..},V_{pooled}$ and Seperate: a multinomial model made out of the normal distributions constructed from the mean and variance of each of the six models. These distributions are displayed below. We can see that the hierachical model gives the strongest suggestions by far. 
+
+```{r, iii}
+#measures for machine 7 for seperate model
+mach1<-rnorm(sims*(1/6),mean(dataset113$ments[dataset113$machineno==1]),
+             sqrt(var(dataset113$ments[dataset113$machineno==1])))
+mach2<-rnorm(sims*(1/6),mean(dataset113$ments[dataset113$machineno==2]),
+             sqrt(var(dataset113$ments[dataset113$machineno==2])))
+mach3<-rnorm(sims*(1/6),mean(dataset113$ments[dataset113$machineno==3]),
+             sqrt(var(dataset113$ments[dataset113$machineno==3])))
+mach4<-rnorm(sims*(1/6),mean(dataset113$ments[dataset113$machineno==4]),
+             sqrt(var(dataset113$ments[dataset113$machineno==4])))
+mach5<-rnorm(sims*(1/6),mean(dataset113$ments[dataset113$machineno==5]),
+             sqrt(var(dataset113$ments[dataset113$machineno==5])))
+mach6<-rnorm(sims*(1/6),mean(dataset113$ments[dataset113$machineno==6]),
+             sqrt(var(dataset113$ments[dataset113$machineno==6])))
+theta.sep.7 <- c(mach1,mach2,mach3,mach4,mach5,mach6)
+
+#measures for machine 7 for pooled model
+y.bar.dot.dot <- mean(dataset113$ments)
+var.pooled <- var(dataset113$ments)
+#sum((dataset113$ments[dataset113$machineno==6] - mean(dataset113$ments))^2) / 
+ # (length(dataset113$ments) - 1)
+theta.pooled.7 <- rnorm(sims, y.bar.dot.dot, sqrt(var.pooled))
+
+#hierarchical
+theta.hier.7 <- rnorm(sims, gibbs.output[,"mu"], sqrt(gibbs.output[,"sigma2"]))
+
 # posterior distribution of the mean of the quality measurements of the potential seventh machine
-plot(density(gibbs.output[,"mu"]), col="red", xlab="Mean Measure", 
-    ylab="Density", main="Mean of Potential Machine 7")
-lines(density(theta.pooled.6[seq(sims/2+1, sims, 1)]), col="blue")
-lines(density(theta.sep.6[seq(sims/2+1, sims, 1)]), col="green")
+plot(density(theta.hier.7), col="red", xlab="Mean Measure", 
+    ylab="Density", main="(iii) Mean of Potential Machine 7")
+lines(density(theta.pooled.7[seq(sims/2+1, sims, 1)]), col="blue")
+lines(density(theta.sep.7[seq(99, 198, 1)]), col="green")
 legend("topright",col = c("red","blue", "green"), 
        legend=c("hierarchical","pooled", "separated"), 
        lty = c(1,1,1)) 
@@ -692,7 +783,13 @@ legend("topright",col = c("red","blue", "green"),
 
 
 ## 6. Chapter 11 Question 4
+
+Derivation of $\sigma_j$ form here. 
+
+Explanation of use of $\sigma_0$ grid here and concerns. Derivation of $\sigma_0$ form?
+
 ```{r, 114}
+###11.4
 #heirarchical model functions
 #tau (step 4)
 tau.post.sample <- function(theta) {
@@ -790,15 +887,17 @@ gibbs.output <- param.storage[seq(sims/2+1, sims, 1),]
 gibbs.output[,7:13] <- sqrt(gibbs.output[,7:13])
 
 #summary table
-t(apply(gibbs.output, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975))))
+df.11.4.output <- data.frame(t(apply(gibbs.output, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975)))))
+colnames(df.11.4.output) <- c("2.5%", "25%", "50%", "75%", "97.5%")
+kable(df.11.4.output, "latex", caption = "Hierarchical Model Estimates", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
 ```
 
 
-
-
+\newpage
 
 ## 7. Chapter 13 Question 5
-Estimating the number of unseen species (see Fisher, Corbet, and Williams, 1943, Efron and Thisted, 1976, and Seber, 1992): suppose that during an animal trapping expedition the number of times an animal from species i is caught is $x_i ~ Poisson(\lambda_i)$. For parts (a)–(d) of this problem, assume a $Gamma(\alpha,\beta)$ prior distribution for the $\lambda_i$’s, with a uniform hyperprior distribution on $(\alpha,\beta)$. The only observed data are $y_k$, the number of species observed exactly k times during a trapping expedition, for $k = 1, 2, 3,...$
+Estimating the number of unseen species (see Fisher, Corbet, and Williams, 1943, Efron and Thisted, 1976, and Seber, 1992): suppose that during an animal trapping expedition the number of times an animal from species i is caught is $x_i \sim Poisson(\lambda_i)$. For parts (a)–(d) of this problem, assume a $Gamma(\alpha,\beta)$ prior distribution for the $\lambda_i$’s, with a uniform hyperprior distribution on $(\alpha,\beta)$. The only observed data are $y_k$, the number of species observed exactly k times during a trapping expedition, for $k = 1, 2, 3,...$
 
 #### Part A
 Write the distribution $p(x_i|\alpha,\beta)$.
@@ -825,6 +924,8 @@ Discuss the sensitivity of the inference in (d) to each of the model assumptions
 
 
 
+
+
 ## 8. Generate / simulate n = 120 observations from a three component mixture 
 
 ```{r, Prep}
@@ -832,12 +933,12 @@ set.seed(100)
 #investigate model and pull 120 observations as directed
 y <- seq(-50,50,0.1)
 #dens <- function (x, theta, stnd){dnorm (x, theta, sqrt(1000*theta*(1-theta)))}
-dens.mix <- 0.1*dnorm(y,0,1) + 0.3*dnorm(y,-2,2) + 0.6*dnorm(y,3,16)
+dens.mix <- 0.1*dnorm(y,0,1) + 0.3*dnorm(y,-2,sqrt(2)) + 0.6*dnorm(y,3,sqrt(16))
 plot (y, dens.mix, ylim=c(0,1.1*max(dens.mix)),
       type="l", xlab="y", ylab="", xaxs="i",
       yaxs="i", yaxt="n", bty="n", cex=2)
 
-vals.mix <- c(rnorm(120*0.1,0,1), rnorm(120*0.3,-2,2), rnorm(0.6*120,3,16))
+vals.mix <- c(rnorm(120*0.1,0,1), rnorm(120*0.3,-2,sqrt(2)), rnorm(0.6*120,3,sqrt(16)))
 labels <- c(rep(1, 12), rep(2, 36), rep(3, 72))
 vals.mix <- data.frame(cbind(vals.mix, labels))
 
@@ -847,19 +948,19 @@ vals.kmeans.cluster <- vals.kmeans$cluster
 vals.df <- data.frame(x = vals.mix$vals.mix, 
                       cluster = vals.kmeans.cluster)
 
-vals.df %>%
-  mutate(num = row_number()) %>%
-  ggplot(aes(y = num, x = x, color = factor(cluster))) +
-  geom_point() +
-  ylab("Values") +
-  ylab("Data Point Number") +
-  scale_color_discrete(name = "Cluster") +
-  ggtitle("K-means Clustering")
+#vals.df %>%
+ # dplyr::mutate(num = row_number()) %>%
+  #ggplot(aes(y = num, x = x, color = factor(cluster))) +
+  #geom_point() +
+  #ylab("Values") +
+  #ylab("Data Point Number") +
+  #scale_color_discrete(name = "Cluster") +
+  #ggtitle("K-means Clustering")
 
 vals.summary.df <- vals.df %>%
-  group_by(cluster) %>%
-  summarize(mu = mean(x), variance = var(x), std = sd(x), size = n()) %>%
-  mutate(p = size / sum(size))
+  dplyr::group_by(cluster) %>%
+  dplyr::summarize(mu = mean(x), variance = var(x), std = sd(x), size = n()) %>%
+  dplyr::mutate(p = size / sum(size))
 ```
 
 #### Part A
@@ -934,7 +1035,7 @@ for (i in 1:2000) {
   }
 }
 
-loglik.vector
+#loglik.vector
 m.step
 
 plot_mix_comps <- function(x, mu, sigma, lam) {
@@ -1061,6 +1162,7 @@ data.frame(x = vals.mix$vals.mix) %>%
 
 #### Part C
 Compare the two.
+
 
 
 
@@ -1222,6 +1324,7 @@ stan_trace(glm_post_mixed)
 
 #### Part E
 Discuss other models for the regression coefficients.
+
 
 
 

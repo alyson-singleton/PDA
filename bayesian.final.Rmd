@@ -1,0 +1,199 @@
+---
+title: PHP2530 Final Project - A Bayesian Analysis of Scott County Injection Network
+  Data
+author: "Alyson Singleton"
+date: "4/30/2020"
+output: pdf_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, results='asis', warning=F, 
+                      message=F, cache=T, fig.align="center", 
+                      set.seed(100))
+# load libraries
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(naniar)
+library(grDevices)
+library(ggplot2)
+library(GGally)
+library(MASS)
+library(boot)
+library(leaps)
+library(corrplot)
+library(glmnet)
+library(neuralnet)
+library(devtools)
+library(ggbiplot)
+library(caret)
+library(standardize)
+library(kableExtra)
+library(knitr)
+library(dplyr)
+```
+
+# Introduction
+
+Significant progress has been made in reducing HIV incidence among people who inject drugs (PWID) in the United States (US), but these declines have stalled in the face of frequent rapid HIV transmission events occurring during an escalating drug overdose epidemic [Singh S, et al. Annals of Internal Medicine 2018, Des Jarlais DC, et al. AIDS 2016]. The largest ever of these events among PWID in a non-urban setting in the US occurred in Scott County, Indiana in 2015, when nearly 200 people in a community of 25,000 individuals were newly diagnosed with HIV infection. 
+
+Several factors have been associated with rapid HIV transmission in PWID, including a lack of awareness that HIV is a threat in the local setting, high frequency of needle/syringe sharing, inaccessibility of sterile injecting equipment, recent changes in drug usage patterns, and large, interconnected risk networks [Des Jarlais DC, et al. AIDS 2016]. Concerning the structure of those networks, certain micro-structures can further exacerbate HIV transmission and persistence of infection. While instances of rapid HIV transmission are more likely in settings with these characteristics [Des Jarlais DC, et al. AIDS 2016], they are not inevitable, with the potential to intervene on any of these factors, including on the network itself.
+
+The ongoing opioid crisis makes this line of research particularly timely. The 2015 outbreak in Indiana, driven largely by high-frequency injection of the prescription opioid oxymorphone, has raised concerns about the potential for other outbreaks of HIV among PWID. An understanding of the impact of network structure on HIV transmission dynamics will be fundamental to mitigating and preventing future outbreaks.
+
+This final project used statistical learning techniques to investigate which structural network characteristics might be most predictive of the magnitude and velocity of subsequent epidemic behavior. I characterized the observed risk network from the HIV outbreak in Scott County, Indiana, as a case study. I generated a series of stochastic networks with comparable numbers of individuals and ties to the observed network to identify how HIV transmission is impacted by varying structural network characteristics. I created the simulated network data as a part of my work as a Research Assistant with the Marshall Research Group. This final project focuses on prediction, an analysis that was previously outside of the scope of the work, but that I have always been interested in. I will now briefly outline the methods used to create the data set as they are imperative for understanding which structures were forced into the networks and which were emergent and stochastically created.
+
+## Background on Observational Data
+
+Our research utilizes previously published information on the observed contact tracing network from the 2015 outbreak in Scott County, Indiana [Campbell EM, et al. Journal of Infectious Diseases 2017, Peters PJ, et al. New England Journal of Medicine 2016]. The investigation of the outbreak was part of an emergency response conducted by the Indiana State Department of Health and the Centres for Disease Control and Prevention. The contact tracing investigation involved disease intervention specialists eliciting the names of past-year sexual and injection contacts of individuals newly diagnosed during the outbreak and offering HIV testing to these contacts.
+
+The observed risk network comprised 420 individuals and 913 named ties, including the main component with 411 individuals. Among these ties, 79.2% were injection-related only, 7.9% were between sex-related only, and 12.9% were multiplex (i.e., were between sexual partners who shared injection equipment). Nearly half of the individuals included in this network (44.5%) were diagnosed with HIV infection during the outbreak investigation. 
+
+## Background on Simulation Methods
+
+### Model Setting 
+
+We adapted a previously published version of the TITAN Model, an agent-based model, to explore rapid HIV transmission in Scott County, Indiana [Goedel WC, et al. Clinical Infectious Diseases 2019]. Agent-based modelling is a simulation method that represents micro-level interactions between individual entities called agents to understand the emergence of macro-level trends. Our model was parameterized, where possible, using published information on injection and sexual behaviour in Scott County and supplemented with estimates from the literature where necessary and then calibrated to the observed number of incident HIV infections.
+
+There were very few rural injection networks to serve as appropriate comparators to the observed network. As we aimed to characterize and identify the potentially unique qualities of this network and their contribution to HIV transmission, we instead compared the observed network to agent-built simulated networks. 
+
+Each iteration of the simulation models HIV transmission in a network of comparable size (420 agents) in discrete time-steps each representing 1 calendar month for 5 years. Each iteration includes the initialization of the model population, the formation of the contact network, the introduction of HIV into the network through a randomly selected agent, and the monitoring of the progression of HIV throughout the population. A total of 1,000 iterations were simulated.
+
+### Population Formation						
+The model first initialized a virtual population. The size of the initial population varied across simulations from 402 to 441, as we aimed for the number of agents included in the simulated risk network (i.e., the number of agents with at least one tie) to be within ten per cent of the number of nodes in the observed network (n = 420). The attributes of agents in the base population were assigned through stochastic processes to achieve the desired gender distribution and gender-specific prevalence of IDU [Campbell EM, et al. Journal of Infectious Diseases 2017]. HIV prevalence in the network was set at 0% at initialization, reflecting an entirely susceptible population.
+
+### Network Formation
+Following population formation, the model created ties between agents to build a risk network. The number of ties between agents represented a primary calibration target, where we aimed to generate networks with a total number of ties within ten per cent of the observed network (n = 913). This process ensured that the networks had a comparable density to the observed network. These ties were distributed within the agent population through the following processes.
+
+All agents were assumed to be able to participate in sexual behaviour in the model and were assigned a target number of sexual partners from a negative binomial distribution with a mean of one partner [Goedel WC, et al. Clinical Infectious Diseases 2019]. Given the low number of male-male sexual dyads reported during contact tracing [Campbell EM, et al. Journal of Infectious Diseases 2017], only male-female sexual dyads were assumed to be possible in the simulated networks. Agents who inject drugs were given an additional target number of injection partners based on the observed injection-specific degree distribution [Campbell EM, et al. Journal of Infectious Diseases 2017]. This degree distribution was represented with a step function, with each step representing a range of possible target numbers of injection partners that an agent might be assigned. Each step was assigned a probability of occurrence, calculated from the observed injection-specific degree distribution. An observed 12.9% of the injection ties were also sexual ties and were constructed as such [Campbell EM, et al. Journal of Infectious Diseases 2017].
+
+The network was constructed through an iterative process. The model iterated through the list of agents who had not yet reached their target numbers to match pairs of agents together. It created a list of eligible partners for each agent under the parameters governing partner compatibility (i.e., allowing for only male-female sexual ties to be formed, but ties of any combination of genders for injection ties), only including agents who were also not yet at their target number of partners. Once the model iterated over all agents who needed additional partners, agents were tied to one another based on this pairing algorithm. The pool of agents not yet at their target number was re-built, and the process was repeated until all individuals were paired or there were no more eligible partners for a given agent. This process introduces stochasticity into the structure of the set of simulated networks: the model provided agents target numbers based on the observed distributions while allowing their realized degree to differ.
+
+### Introduction of HIV Infection
+After the formation of the contact network, a single agent engaging in IDU was chosen to seroconvert spontaneously, thus introducing HIV into the network. Hereafter, we refer to this agent as the initial infection.
+
+### HIV Transmission 
+Briefly, agents were assigned a target number of condomless vaginal intercourse acts per partner per month, drawn from a Poisson distribution with a mean of 13 acts per month [Crosby RA, et al. Annals of Epidemiology 2012]. Sexual acts that included the use of condoms were not explicitly simulated as they were assumed to carry a negligible risk of HIV transmission. Agents who inject drugs were also assigned a target number of injection acts per month from a Poisson distribution with a mean of 150 injection acts [Dasgupta S, et al. AIDS & Behavior 2019]. On average, 34% of these injection acts were estimated to include syringe sharing [Dasgupta S, et al. AIDS & Behavior 2019]. These acts were evaluated as the number of trials (n) in binomial distributions that model HIV transmission, where the probability of success (p) is the probability of transmission associated with particular behaviours.
+
+## Simulated Network Analysis
+
+We measured possible differences using network measures that had been previously shown to either facilitate or limit rapid HIV transmission in many past published works. These measures included the number of components in the network (omitting isolated individuals), size of the largest component (referred to as main component), density of the main component, average betweenness centrality of the main component, betweenness centrality of the initial infection, average geodesic distance of the main component, geodesic distance of the initial infection, diameter of the main component, degree of the initial infection, centralization of the main component, the proportion of individuals located in a 2-core in the main component, and transitivity in the main component. A glossary of terms guiding the analysis of structural network characteristics can be found on the following page for your reference.
+
+The primary comparison outcome measure across scenarios was the cumulative number of incident HIV infections over the simulation period. We also measured the number of months elapsed until ten incident infections, the number of HIV infections that incited the contact tracing investigation and the subsequent increase in testing activities to investigate how network structure may be related to epidemic velocity.
+
+```{r, Glossary of Network Measures}
+glossary.df <- t(data.frame(c("Number of Components", "Number of components in the network, omitting isolated individuals.", "The number of components helps represent the dispersion of individuals across a static network, as individuals in separate components cannot, by definition, infect one another [Bearman et al., 2004; Estrada, 2012]."),
+                            c("Component Size", "Number of individuals within a component.", "The size of the largest component in a static network represents an upper-bound for potential disease diffusion in the population [Estrada, 2012]."),
+                            c("Density", "Number of ties in the network divided by the number of total possible ties in the network.", "Network density helps determine outbreak magnitude and represents the “knittedness” of the component of interest [Seidman, 1983; Tarwater and Martin, 2001]."),
+                            c("Betweenness centrality", "Fraction of shortest paths between all other pairs of individuals that pass through a given index individual.", "A component with high average betweenness centrality is dependent on a select number of individuals for disease diffusion, while one with low average betweenness centrality likely has many routes of transmission through many individuals [Christley et al., 2005; Freeman, 1978]."),
+                            c("Geodesic Distance", "Length of the shortest path between two connected individuals in a network.", "Networks with lower average geodesic distance might have multiple paths, or “shortcuts,” between individuals, compared to networks that form in long, chain-like structures [Bearman et al., 2004; Estrada, 2012; Wasserman et al., 1994]."),
+                            c("Diameter", "Maximum distance between a pair of individuals in a component.", "A large diameter might indicate the network includes a long, chain-like structure, rather than a more condensed shape [Wasserman et al., 1994]."),
+                            c("Degree", "An individual's numbers of ties.", "An individual's degree represents its potential influence on the network [Bell et al., 1999]."),
+                            c("Centralization", "Sum of the differences of the largest observed degree and each of the individuals' degrees, divided by the sum of the maximum of these differences.", "A high centralization measure could indicate dependence on one or a few individuals in a hierarchical network, and it can either accelerate disease diffusion through these individuals acting as “broadcasters” [Valente, 2010] or reduce disease diffusion through a phenomenon called the “firewall effect” [Khan et al., 2013; Valente, 2010]."),
+                            c("K-cores", "A connected group in which all individuals are connected to at least k individuals in the group.", "Networks with substantial amounts of their individuals located in k-cores represent structures where there are tight-knit sub-groups [Doreian and Woodard, 1994]. 2-core participation specifically has been shown to be a high-risk position within a network [Friedman et al., 1997]."),
+                            c("Transitivity", "The proportion of all triads that exhibit closure (i.e., a complete triangle).", "Individuals with high transitivity are more at risk for acquiring the disease because they can be located in the more dense areas of the network and can be reached through multiple avenues. Diseases spread more readily through highly transitive networks [Shirley and Rushton, 2005].")))
+colnames(glossary.df) <- c("Metric", "Definition", "Hypothesized Association with Epidemic Behavior")
+rownames(glossary.df) <- c(1:10)
+
+kable(glossary.df, "latex", caption = "Glossary of terms guiding the analysis of structural network characteristics.", booktabs = T) %>%
+  kable_styling(latex_options = c("striped", "hold_position"), font_size = 8) %>%
+  column_spec(2:3, width = "6cm")
+```
+
+```{r, Load Data}
+#load data
+sc.set.original <- read.csv("~/Desktop/research/SC_inj_net_dynamics/scripts/A3_conditions_ten_percent.csv")
+
+#specify only structural exposure vars and cuminc outcome
+sc.set.original[,1:6] <- NULL
+sc.set <- sc.set.original[c(1:19,30)] #remove other outcomes, can investigate later
+```
+
+# Basic Data Investigation
+
+I began my investigation of the data by investigating the potential collinearity between the structural network measurements. Below you can see a correlation plot. I was unsprised to see groups of variables that were especially correlated. One group is a set of measurements on the placement of the randomly selected initial infection location (notated by "ii" for initial infection). There is a second group that is a set of structural characteristics that are mathematically similar, at least given our impletemented conditions on the network. This group is correlated because they investigate similar structures, although they each have valuable nuance and likely can differ more extemely in other types of networks, with different densities, for example. 
+
+```{r, Correlation Investigation, fig.width=7,fig.height=7}
+############################################
+#correlation plot of all
+# corrplot(cor(sc.set), method = "circle", type = "lower", tl.col = "black", tl.srt = 45, order = "hclust")
+#remove some with high correlation (avg degree, totalnodecount, totaledgecount, CCnodescount, CCedgescount)
+#make a seperate set with a few correlated variabls removed (remove totalnodecount and totaledgecount)
+sc.set.limit <- sc.set[-c(1,10:13)]
+corrplot(cor(sc.set.limit), method = "circle", type = "lower", tl.col = "black", tl.srt = 45, order = "hclust") #FPC
+#corrplot.mixed(cor(sc.set.limit))
+```
+
+\pagebreak
+
+# Bayesian Model Framework
+Describe a model, including the prior distribution, and state clearly the assumptions made. Include a discussion of the implied data collection mechanism and steps to deal with unintended missing data.
+
+
+
+# Computational Methods -- Evaluation
+Describe the algorithms and computational methods used in the analysis (e.g. MCMC, EM). Check that the algorithms converged, and summarize the posterior distribution obtained for the different estimands in the model.
+```{r, Frequentist}
+library(car)
+freqlinmod <- glm(cumulative_incidence ~ ., 
+                  data=sc.set.limit, 
+                  family=gaussian)
+summary(freqlinmod)
+vif(freqlinmod)
+```
+
+```{r, Bayesian}
+library(rstan)
+library(rstanarm)
+library(bayesplot)
+
+glm_post1 <- stan_glm(cumulative_incidence ~ ., 
+                      data=sc.set.limit, 
+                      family=gaussian,
+                      prior=NULL)
+summary(glm_post1)
+
+# Look at trace plots
+# Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
+    #(all chains are overlapping around the same value).
+stan_trace(glm_post1)
+
+#posterior predictive chekcs
+pp_check(glm_post1)
+pp_check(glm_post1)
+ppc_intervals(y = dataset153$y, yrep = posterior_predict(glm_post1),x = dataset153$x1)
+
+stan_hist(glm_post1, pars=c("x1"), bins=40)
+post_samps_speed <- as.data.frame(glm_post1, pars=c("x1"))[,"x1"]
+mn_speed <- mean(post_samps_speed) # posterior mean 
+ci_speed <- quantile(post_samps_speed, probs=c(0.05, 0.95)) # posterior 90% interval 
+
+stan_hist(glm_post1, pars=c("x2"), bins=40)
+stan_hist(glm_post1, pars=c("x3"), bins=40)
+
+
+glm_post2 <- stan_glm(cumulative_incidence ~ ., 
+                      data=sc.set.limit, 
+                      family=gaussian)
+summary(glm_post2)
+
+# Look at trace plots
+# Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
+    #(all chains are overlapping around the same value).
+stan_trace(glm_post2)
+```
+
+# Posterior Predictive Checks
+Perform checks that the analysis and the model are reasonable, including showing that the model can generate replicate data that agree with the observed data and that are scientifically plausible (in ways similar to the one described in class).
+
+# Conclusion
+Provide conclusions for the whole analysis: what can be learned from your analysis, what future directions are suggested? Also, are the assumptions made reasonable, and if not, what would you change?
+
+
+I greatly enjoyed this project and this class. Thank you very much for your instruction and guidance this semester.
+
+\pagebreak
+
+# Code Appendix
+
+```{r, ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
