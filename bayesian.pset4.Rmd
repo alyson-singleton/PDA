@@ -6,9 +6,10 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = F, results='asis', warning=F, message=F, cache=T)
+knitr::opts_chunk$set(echo = F, results='asis', warning=F, message=F, cache=T,
+                      fig.height=4, fig.width=5, fig.align="center")
 pacman::p_load(actuar, dplyr, kableExtra, knitr, LearnBayes, boot, lattice, gtools, ggplot2,
-               LaplacesDemon)
+               LaplacesDemon, rstan, rstanarm, bayesplot)
 ```
 
 ## 1. The Importance Sampling Algorithm
@@ -170,7 +171,7 @@ round(rbind(mu1Errors, mu2Errors, thetaErrors, accRates, effSSize), 2)
 par(mfrow = c(1, 3))
 plot(mu1Errors, type = "l", xlab = "Rejection control constant", main = "Plot of errors in estimating mu1", ylab = "Absolute error")
 plot(mu2Errors, type = "l", xlab = "Rejection control constant", main = "Plot of errors in estimating mu2", ylab = "Absolute error")
-plot(mu3Errors, type = "l", xlab = "Rejection control constant", main = "Plot of errors in estimating mu3", ylab = "Absolute error" )
+plot(thetaErrors, type = "l", xlab = "Rejection control constant", main = "Plot of errors in estimating mu3", ylab = "Absolute error" )
 
 
 par(mfrow = c(1, 2))
@@ -183,6 +184,12 @@ plot(effSSize, ylim = c(0, 5000), type = "l", xlab = "Rejection control constant
 
 ## 2. Chapter 10 Question 5
 #### Part A
+Indeed, we are given the structure of the model from the problem statement. The information we have is as follows, where $J=10$:
+$$p(y_j|\theta_j) \sim \text{Bin}(n_j,\theta_j), \text{ i.e.   } p(y|\theta,\alpha,\beta) = \prod_{j=1}^{10}{n_j \choose y_i}\theta_j^{y_i}(1-\theta_j)^{n_j-y_i}$$
+$$p(\theta_j) \sim \text{logit}^{-1}(\alpha+\beta x_j)$$
+$$\alpha ∼ t_4(0, 2^2) \text{ and } \beta ∼ t_4(0, 1^2)$$
+$$x_j ∼ U(0, 1) \text{ and } n_j ∼ \text{Poiss}(5)$$
+I build the dataset of 10 samples from this model as directed (Table 1).
 ```{r, 10.5A}
 #build random dataset from the model
 yis <- c(rep(NA, 10))
@@ -211,11 +218,21 @@ for (i in 1:10) {
 }
 
 dataset <- cbind(yis,nis)
-#dataset
+dataset.df <- t(data.frame(dataset))
+kable(dataset.df, "latex", caption = "10.5 Sampled Data", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
 ```
 
 #### Part B
+Next, I used rejection sampling to acquire to get 1000 independent posterior draws from $(\alpha, \beta)$. The likelihood follows:
+$$p(\alpha,\beta|y,n,x) \propto p(\alpha,\beta)\prod_{i=1}^k p(y_i|\alpha,\beta,n_i,x_i)$$
+$$p(\alpha,\beta|y,n,x) \propto p(\alpha,\beta) \prod_{i=1}^k [\text{logit}^{-1}(\alpha+\beta x_i)]^{y_i}[1-\text{logit}^{-1}(\alpha+\beta x_i)]^{n_i-y_i}$$
+Notably, 
+
+First, I display the contours of the joint posterior distribution of $(\alpha, \beta)$ for your reference. The following plot shows the draws from the rejection sampling.
+
 ```{r, 10.5B}
+library(LearnBayes)
 #posterior function
 logitBin = function (theta, data)
 {
@@ -224,7 +241,8 @@ logitBin = function (theta, data)
   y = data[,1]
   n = data[,2]
   N = length(xis)
-  prelikelihood <- function (y, n, alpha, beta) y*log(inv.logit(alpha + beta*xis)) + (n-y)*log((1-inv.logit(alpha + beta*xis)))
+  prelikelihood <- function (y, n, alpha, beta) y*log(inv.logit(alpha + beta*xis)) + 
+    (n-y)*log((1-inv.logit(alpha + beta*xis)))
   loglikelihood <- sum(prelikelihood(y, n, alpha, beta))
   post = loglikelihood #+ logPrior
   return(post)
@@ -240,11 +258,14 @@ n2 = ng^2
 Z = apply(cbind(X[1:n2], Y[1:n2]), 1, logitBin, data = dataset)
 Z = Z - max(Z)
 Z = matrix(Z, c(ng, ng))
-contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2)
+contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2,
+        xlab="alpha", 
+        ylab="beta",
+        main="Contour plot of joint posterior")
 
 ####Rejection sampling
 #find the mode
-tpar=laplace(logitBin,array(c(3,1),c(1,2)),data=dataset)
+tpar=LearnBayes::laplace(logitBin,array(c(3,1),c(1,2)),data=dataset)
 logitBinT=function(theta,data,tpar)
 {
 	data=data
@@ -254,7 +275,7 @@ logitBinT=function(theta,data,tpar)
 }
 
 start=array(c(3,1),c(1,2))
-fit1=laplace(logitBinT,start,data=dataset, tpar=tpar)
+fit1=LearnBayes::laplace(logitBinT,start,data=dataset, tpar=tpar)
 #logitBinT(fit1$mode,dataset,tpar)
 
 rejectsamp=function(logf,tpar,dmax,n,data){
@@ -266,28 +287,50 @@ rejectsamp=function(logf,tpar,dmax,n,data){
 }
 
 theta=rejectsamp(logitBin,tpar,logitBinT(fit1$mode,dataset,tpar),2000,dataset)
-dim(theta)
-contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2)
+#dim(theta)
+contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2,
+        xlab="alpha", 
+        ylab="beta",
+        main="Posterior Draws from Rejection Sampling",
+        drawlabels = F)
 points(theta[,1],theta[,2])
 ```
+
 #### Part C
+
+Here we use the Laplace function to estimate the approximate the posterior density for $(\alpha,\beta)$ with a normal centered at the posterior mode with covariance matrix fit to the curvature at the mode. See below for the estimates:
+
 ```{r, 10.5C}
 # build normal approximation
-tpar=laplace(logitBin,array(c(-1,1),c(1,2)),data=dataset)
+tpar=LearnBayes::laplace(logitBin,array(c(-1,1),c(1,2)),data=dataset)
 logitBinT=function(theta,data,tpar) {
   data=data
   d=logitBin(theta,data)-dmt(theta,mean=c(tpar$mode), S=2*tpar$var,df=4,log=TRUE)
   return(d)
 }
 start=array(c(-1,1),c(1,2))
-fit1=laplace(logitBinT,start,data=dataset,tpar=tpar)
-logitBinT(fit1$mode,dataset,tpar)
-fit1$mode
-fit1$var
+fit1=LearnBayes::laplace(logitBinT,start,data=dataset,tpar=tpar)
+#logitBinT(fit1$mode,dataset,tpar)
+
+dataset.df10.5C1 <- data.frame(fit1$mode)
+colnames(dataset.df10.5C1) <- c("alpha", "beta")
+rownames(dataset.df10.5C1) <- c("")
+kable(dataset.df10.5C1, "latex", caption = "Estimated Modes", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+
+dataset.df10.5C2 <- data.frame(fit1$var)
+colnames(dataset.df10.5C2) <- c("alpha", "beta")
+rownames(dataset.df10.5C2) <- c("alpha", "beta")
+kable(dataset.df10.5C2, "latex", caption = "Estimated Covariance Matrix", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
 ```
+
 #### Part D
+Using the calculated posterior mode and covariance matrix to build two-dimensional $t_4$ distributions, I employed importance sampling to estimate $E(alpha|y)$ and $E(\beta|y)$. First, see the samples displayed on the contour plot. The table below that displayes the distribution of the estimates for $(\alpha,\beta)$. The means of the 1,000 samples were calculated as 0.205 for $\alpha$ and -2.01 for $\beta$.
+
 ```{r, 10.5D}
-##importance sampling
+##importance sampling using normal centered at the posterior mode with covariance 
+    #matrix fit to the curvature at the mode
 theta = rmt(1000, mean = c(tpar$mode), S = tpar$var, df = 4)
 lf = apply(theta,1,logitBin,data=dataset)
 lp = dmt(theta, mean = c(tpar$mode), S = tpar$var, df = 4,log = TRUE)
@@ -295,18 +338,37 @@ wt = exp(lf - lp)
 probs=wt/sum(wt, na.rm = T)
 probs[is.na(probs)] <- 0
 theta.S=theta[sample(1:1000,size=1000,prob=probs,replace=TRUE),]
-apply(theta.S,2,summary)
 
-contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2, ylab = "beta", xlab= "alpha")
+contour(x0, y0, Z, levels = c(-30, -20, -10, -5, -1, -0.1, -0.01), lwd = 2, 
+        xlab="alpha", 
+        ylab="beta",
+        main="Posterior Draws from Importance Sampling",
+        drawlabels = F)
 points(theta.S[,1],theta.S[,2])
+
+#estimates
+dataset.df10.5D <- t(data.frame(apply(theta.S,2,summary)))
+rownames(dataset.df10.5D) <- c("alpha", "beta")
+kable(dataset.df10.5D, "latex", caption = "10.5 Estimates for Expectations", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
 ```
+
 #### Part E
+I calculated the effective sample size to be 1.63. Given it's small size this would lead me to believe that there are likely a few extremely high weights which might be unduly influencing the distribution.
+
 ```{r, 10.5E}
+normalize = function(x){return(x/sum(x))}
+seff <- 1/sum(normalize(wt)^2)
+#seff <- length(wt)/(1 + var(wt))
+#seff
 ```
 
 
 ## 3. Chapter 10 Question 8
 #### Part A
+
+First, I set out to recreate the approximate posterior distribution of the bioassay example in Section 3.7. My first plot below is my recreation of Figure 3.3b to confirm that I am recreating the distribution correctly. After sampling 10,000 from the approximate distribution, I resampled without replacement $k = 1000$ samples. The plot of those draws are shown on the next plot.
+
 ```{r, 108A}
 # load data
 x108 <- c(-0.86,-0.30,-0.05,0.74) 
@@ -321,7 +383,8 @@ logitBin108 = function (theta, data)
   beta <- theta[2]
   y = data[,1]
   n = data[,2]
-  prelikelihood <- function (y, n, alpha, beta) y*log(inv.logit(alpha + beta*x108)) + (n108-y)*log((1-inv.logit(alpha + beta*x108)))
+  prelikelihood <- function (y, n, alpha, beta) y*log(inv.logit(alpha + beta*x108)) + 
+    (n108-y)*log((1-inv.logit(alpha + beta*x108)))
   loglikelihood <- sum(prelikelihood(y, n, alpha, beta))
   logPrior <- 0 + 0 #non informative 
   post = loglikelihood + logPrior
@@ -340,10 +403,12 @@ Z = apply(cbind(X[1:n2], Y[1:n2]), 1, logitBin108, data = dataset108)
 Z = exp(Z)
 Z = matrix(Z, c(ng, ng))
 contour(x0, y0, Z, levels = c(seq(4.822959e-39, 2.737619e-03, length.out=10)), 
-        lwd = 1, ylab = "beta", xlab= "alpha")
+        lwd = 1, ylab = "beta", xlab= "alpha",
+        main="Contour Plots to Compare to Figure 3.3b",
+        drawlabels = F)
 
 # build normal approximation
-tpar=laplace(logitBin108,array(c(1,10),c(1,2)),data=dataset108)
+tpar=LearnBayes::laplace(logitBin108,array(c(1,10),c(1,2)),data=dataset108)
 betabinT108=function(theta,data,tpar)
 {
 	data=data
@@ -351,8 +416,8 @@ betabinT108=function(theta,data,tpar)
 	return(d)
 }
 start=array(c(1,10),c(1,2))
-fit1=laplace(betabinT108,start,data=dataset108, tpar=tpar)
-betabinT108(fit1$mode,dataset108,tpar)
+fit1=LearnBayes::laplace(betabinT108,start,data=dataset108, tpar=tpar)
+#betabinT108(fit1$mode,dataset108,tpar)
 
 #importance resampling SIR without replacement
 theta = rmt(10000, mean = c(tpar$mode), S = tpar$var, df = 4)
@@ -362,17 +427,40 @@ lp = dmt(theta, mean = c(tpar$mode), S = tpar$var, df = 4,log = TRUE)
 md = max(lf - lp)
 wt = exp(lf - lp)
 probs=wt/sum(wt)
-theta.S=theta[sample(1:10000,size=10000,prob=exp(probs),replace=F),]
-apply(theta.S,2,summary)
+theta.S=theta[sample(1:length(probs),size=1000,prob=exp(probs),replace=F),]
+#apply(theta.S,2,summary)
 
 contour(x0, y0, Z, levels = c(seq(4.822959e-39, 2.737619e-03, length.out=10)), 
-        lwd = 1, ylab = "beta", xlab= "alpha")
+        lwd = 1, ylab = "beta", xlab= "alpha",
+        main="Importance Resampling Without Replacement",
+        drawlabels = F)
 points(theta.S[,1],theta.S[,2], pch='.')
 ```
 
 #### Part B
+See below for my first attempt at displaying the distribution of the simulated importance ratios. 
+
+```{r}
+hist(wt, main="Distribution of the Simulated Importance Ratios",
+     xlab="Simulated Importance Ratios with Outliers")
+```
+
+For a more representative display of the simulated importance ratios, I remove multiple outliers from the upper end of the distribution. The resulting distribution is displayed below. The importance ratios appear to ratios vary as we would hope! 
+
+```{r}
+#remove outliers
+for(i in 1:40){
+  wt<-wt[wt < max(wt)]
+}
+
+hist(wt, main="Distribution of the Simulated Importance Ratios",
+     xlab="Simulated Importance Ratios without Outliers")
+```
 
 #### Part C
+
+Below I display the results from doing importance resampling with replacement. There does not appear to be much difference between the samples drawn when replacing that in Part A where there was none. This is an indicator that the importance weights are moderate, whichi is in line with what we saw in Part B. In situations like these, it would make sense that sampling with and without replacement gives similar results (as compared to a situation where there are a few large weights and many small weights and sampling with replacement would pick the same few values repeatedly, leading to a different set that a more conservative without replacement approach).
+
 ```{r, 108C}
 #importance resampling SIR WITH replacement
 theta = rmt(10000, mean = c(tpar$mode), S = tpar$var, df = 4)
@@ -382,13 +470,16 @@ lp = dmt(theta, mean = c(tpar$mode), S = tpar$var, df = 4,log = TRUE)
 md = max(lf - lp)
 wt = exp(lf - lp)
 probs=wt/sum(wt)
-theta.S=theta[sample(1:10000,size=10000,prob=exp(probs),replace=T),]
-apply(theta.S,2,summary)
+theta.S=theta[sample(1:length(probs),size=1000,prob=exp(probs),replace=T),]
+#apply(theta.S,2,summary)
 
 contour(x0, y0, Z, levels = c(seq(4.822959e-39, 2.737619e-03, length.out=10)), 
-        lwd = 1, ylab = "beta", xlab= "alpha")
+        lwd = 1, ylab = "beta", xlab= "alpha",
+        main="Importance Resampling With Replacement",
+        drawlabels = F)
 points(theta.S[,1],theta.S[,2], pch='.')
 ```
+
 
 
 
@@ -618,28 +709,24 @@ tau.post.sample <- function(theta) {
 }
 
 # change sigma function
-
-sigma.post.sample.p2 <- function(theta) {
+sigma.post.sample.p2 <- function(theta, mu) {
+  sigma2.star <- NULL
   for(j in 1:J)	{
-  #first find sigma0
-  sigma.0 <- seq(0.01, 30, 0.25) 
-  sigma.0.probs <- dinvchisq(1,1,sigma.0)
-  sigma.cond <- rinvchisq(1,1,sample(sigma.0, 1, prob=sigma.0.probs))
+    k <- 5#length( y )
+    nu.k <- 1 + k
+    sigma.0.grid <- seq(0.25, 30, 0.25)
+    sigma2.star.vals<-NULL
+    probs <- NULL
+    for (i in 1:length(sigma.0.grid)) {
+      v <- mean((theta[j] - mu)^2)
+      sigma2.k.option <- (1 * sigma.0.grid[i] + k*v) / (1 + k) #nu.0=1
+      sigma2.star.vals[i] <- rinvchisq(1, nu.k, sigma2.k.option)
+      probs[i] <- dinvchisq(sigma2.star.vals, nu.k, sigma2.k.option)
+    }
+    #print(mean(probs))
+    sigma2.star[j] <- sample(sigma2.star.vals, 1, prob=probs)#rinvchisq(1, nu.k, sigma2.k)  
   }
-  return(sigma.cond)
-}
-
-sigma.post.sample <- function(theta) {
-  #first find sigma hat
-  sigma.hat.func <- function(theta) {
-    sigma.hat <- sapply(1:6, function(x) (dataset113$ments[dataset113$machineno==x] - theta[x])^2)  
-    sigma.hat <- (1/n) * sum(unlist(sigma.hat))
-    return(sigma.hat)
-  }
-  #next find conditional sigma
-  sigma.hat <- sigma.hat.func(theta) 
-  sigma.cond <- rinvchisq(1,n,sigma.hat)
-  return(sigma.cond)
+  return(sigma2.star)
 }
 
 #mu (step 2)
@@ -681,16 +768,17 @@ gibbs.sampler <- function(sample.i) {
                                "tau2","mu")
   #starting values for theta, tau, sigma and mu
   param.storage[1,1:6] <- sample.i
-  param.storage[1,7:12] <- sigma.post.sample.p2(sample.i)
   param.storage[1,13] <- tau.post.sample(sample.i)
-  param.storage[1,14] <- mu.post.sample(sample.i,param.storage[1,9])
+  param.storage[1,14] <- mu.post.sample(sample.i,param.storage[1,13])
+  param.storage[1,7:12] <- sigma.post.sample.p2(sample.i,param.storage[1,14])
   
   #interations
   for (i in 2:sims) {
     param.storage[i,1:6] <- theta.post.sample(param.storage[i-1,14], param.storage[i-1,7:12], param.storage[i-1,13])
-    param.storage[i,7:12] <- sigma.post.sample.p2(param.storage[i,1:6])
     param.storage[i,13] <- tau.post.sample(param.storage[i,1:6])
-    param.storage[i,14] <- mu.post.sample(param.storage[i,1:6], param.storage[i,9])
+    param.storage[i,14] <- mu.post.sample(param.storage[i,1:6], param.storage[i,13])
+    param.storage[i,7:12] <- sigma.post.sample.p2(param.storage[i,1:6], param.storage[i,14])
+    
   }
 return(param.storage)
 }
@@ -703,21 +791,23 @@ gibbs.output[,7:13] <- sqrt(gibbs.output[,7:13])
 
 #summary table
 t(apply(gibbs.output, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975))))
-
 ```
 
 
+
+
+
 ## 7. Chapter 13 Question 5
-Estimating the number of unseen species (see Fisher, Corbet, and Williams, 1943, Efron and Thisted, 1976, and Seber, 1992): suppose that during an animal trapping expedition the number of times an animal from species i is caught is xi ∼ Poisson(λi). For parts (a)–(d) of this problem, assume a Gamma(α,β) prior distribution for the λi’s, with a uniform hyperprior distribution on (α,β). The only observed data are yk, the number of species observed exactly k times during a trapping expedition, for k = 1, 2, 3, . . .
+Estimating the number of unseen species (see Fisher, Corbet, and Williams, 1943, Efron and Thisted, 1976, and Seber, 1992): suppose that during an animal trapping expedition the number of times an animal from species i is caught is $x_i ~ Poisson(\lambda_i)$. For parts (a)–(d) of this problem, assume a $Gamma(\alpha,\beta)$ prior distribution for the $\lambda_i$’s, with a uniform hyperprior distribution on $(\alpha,\beta)$. The only observed data are $y_k$, the number of species observed exactly k times during a trapping expedition, for $k = 1, 2, 3,...$
 
 #### Part A
-Write the distribution p(xi|α,β).
+Write the distribution $p(x_i|\alpha,\beta)$.
 
 #### Part B
-Use the distribution of xi to derive a multinomial distribution for y given that there are a total of N species.
+Use the distribution of $x_i$ to derive a multinomial distribution for y given that there are a total of N species.
 
 #### Part C
-Suppose that we are given y = (118, 74, 44, 24, 29, 22, 20, 14, 20, 15, 12, 14, 6, 12, 6, 9, 9, 6, 10, 10, 11, 5, 3, 3), so that 118 species were observed only once, 74 species were observed twice, and so forth, with a total of 496 species observed and 3266 animals caught. Write down the likelihood for y using the multinomial distribution with 24 cells (ignoring unseen species). Use any method to find the mode of α,β and an approximate second derivative matrix.
+Suppose that we are given y = (118, 74, 44, 24, 29, 22, 20, 14, 20, 15, 12, 14, 6, 12, 6, 9, 9, 6, 10, 10, 11, 5, 3, 3), so that 118 species were observed only once, 74 species were observed twice, and so forth, with a total of 496 species observed and 3266 animals caught. Write down the likelihood for y using the multinomial distribution with 24 cells (ignoring unseen species). Use any method to find the mode of $(\alpha,\beta)$ and an approximate second derivative matrix.
 
 #### Part D
 Derive an estimate and approximate 95% posterior interval for the number of additional species that would be observed if 10,000 more animals were caught.
@@ -985,7 +1075,7 @@ Regression with many explanatory variables: Table 15.2 displays data from a desi
 #### Part A
 Fit an ordinary linear regression model (that is, nonhierarchical with a uniform prior distribution on the coefficients), including a constant term and the nine explanatory variables above.
 
-```{r, 153PartA}
+```{r, 153PartA Prep}
 #load data
 dataset153 <- data.frame(c(1300, 1300, 1300, 1300, 1300, 1300, 1200, 1200, 1200, 1200, 1200, 1200, 1100, 1100, 1100, 1100),
                          c(7.5, 9.0, 11.0, 13.5, 17.0, 23.0, 5.3, 7.5, 11.0, 13.5, 17.0, 23.0, 5.3, 7.5, 11.0, 17.0),
@@ -993,26 +1083,126 @@ dataset153 <- data.frame(c(1300, 1300, 1300, 1300, 1300, 1300, 1200, 1200, 1200,
                            0.0840, 0.0980, 0.0920, 0.0860),
                          c(49.0, 50.2, 50.5, 48.5, 47.5, 44.5, 28.0, 31.5, 34.5, 35.0, 38.0, 38.5, 15.0, 17.0, 20.5, 19.5))
 colnames(dataset153) <- c("x1", "x2", "x3", "y")
+```
 
-#build model as instructed
-library(MCMCpack)
-part.a.mod <- lm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + poly(x1,2) + poly(x2,2) + poly(x3,2), data = dataset153)
-part.a.mod2 <- MCMCregress(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), data = dataset153, 1000, 10000)
-summary(part.a.mod2)
-#plot(part.a.mod)
-
-#model output
-output <- summary(part.a.mod)$coef[, 1:2]
-out <- cbind(output, confint(part.a.mod)[c(1:4,6,8,10:13),])
+```{r, MODEL 1 : frequentist model}
+# MODEL 1 : frequentist model
+library(car)
+freq.mod <- lm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + poly(x1,2) + poly(x2,2) + poly(x3,2), data = dataset153)
+summary(freq.mod)
+output <- summary(freq.mod)$coef[, 1:2]
+out <- cbind(output, confint(freq.mod)[c(1:4,6,8,10:13),])
 colnames(out) <- c("posterior mean", "posterior std", "2.5", "97.5")
 round(out, 2)
+
+freq.mod <- lm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), data = dataset153)
+summary(freq.mod)
+output <- summary(freq.mod)$coef[, 1:2]
+out <- cbind(output, confint(freq.mod)[c(1:10),])
+colnames(out) <- c("posterior mean", "posterior std", "2.5", "97.5")
+round(out, 2)
+vif(freq.mod)
+
+```
+
+```{r, MODEL 2 : MCMC regress}
+# MODEL 2 : use simple MCMC regress (uniform priors?)
+library(MCMCpack)
+part.a.mod2 <- MCMCregress(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
+                           data = dataset153, burnin = 1000, mcmc = 10000)
+summary(part.a.mod2)
+plot(part.a.mod2)
+```
+
+```{r, MODEL 3 : use rjags, eval=F}
+# MODEL 3 : use rjags
+library(rjags)
+library(R2jags)
+
+dataset153.dat<-list(y=dataset153$y,
+                     x1=dataset153$x1, x2=dataset153$x2, x3=dataset153$x3)
+
+cat(
+    "model{
+    for (i in 1:16) {
+      y[i] ~dnorm(mu[i] , tau)
+      mu[i] <- beta0 + beta1*x1[i] + beta2*x2[i] + beta3*x3[i]
+    }
+    beta0 ~dnorm(0, 0.00001)
+    beta1  ~dnorm(0, 0.00001)
+    beta2 ~dnorm(0, 0.00001)
+    beta3 ~dnorm(0, 0.00001)
+    tau ~ dgamma (0.001, 0.001)
+    sigma2 <- 1/tau}",
+    file="m1.jag"
+    )
+
+m1.inits<-list(list("beta0"=1,"beta1"=0,"beta2"=0,"beta3"= 0,
+          "tau"=1))
+
+parameters <- c("beta0", "beta1", "beta2", "beta3", "mu", 
+           "sigma2")
+
+m1 <- jags(data = dataset153.dat,
+        inits = m1.inits,
+        parameters.to.save = parameters,
+        model.file = "m1.jag",
+        n.chains = 1,
+        n.iter = 5000,
+        n.burnin = 2000,
+        n.thin = 1)
+
+m1
+plot(m1)        
+traceplot(m1)       
+plot(as.mcmc(m1))
+```
+
+```{r, MODEL 4 : use stan, eval=F}
+# MODEL 4 : use stan
+library(rstan)
+library(rstanarm)
+library(bayesplot)
+
+glm_post1 <- stan_glm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
+                      data = dataset153, 
+                      family=gaussian, 
+                      prior=NULL)
+summary(glm_post1)
+
+# Look at trace plots
+# Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
+    #(all chains are overlapping around the same value).
+stan_trace(glm_post1)
+
+#posterior predictive chekcs
+pp_check(glm_post1)
+ppc_intervals(y = dataset153$y, yrep = posterior_predict(glm_post1),x = dataset153$x1)
+
+stan_hist(glm_post1, pars=c("x1"), bins=40)
+post_samps_speed <- as.data.frame(glm_post1, pars=c("x1"))[,"x1"]
+mn_speed <- mean(post_samps_speed) # posterior mean 
+ci_speed <- quantile(post_samps_speed, probs=c(0.05, 0.95)) # posterior 90% interval 
+
+stan_hist(glm_post1, pars=c("x2"), bins=40)
+stan_hist(glm_post1, pars=c("x3"), bins=40)
 ```
 
 #### Part B
 Fit a mixed-effects linear regression model with a uniform prior distribution on the constant term and a shared normal prior distribution on the coefficients of the nine variables above. If you use iterative simulation in your computations, be sure to use multiple sequences and monitor their joint convergence.
 
-```{r, 153PartB}
+```{r, 153PartB, eval=F}
+glm_post_mixed <- stan_glm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
+                      data = dataset153, 
+                      family=gaussian, 
+                      prior=normal(0,5),
+                      prior_intercept = NULL)
+summary(glm_post_mixed)
 
+# Look at trace plots
+# Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
+    #(all chains are overlapping around the same value).
+stan_trace(glm_post_mixed)
 ```
 
 #### Part C
@@ -1021,47 +1211,20 @@ Discuss the differences between the inferences in (a) and (b). Interpret the dif
 #### Part D
 Repeat (a), but with a t4 prior distribution on the nine variables.
 
-```{r, 153PartD}
-library(rjags)
-library(R2jags)
-
-lm1jags <- function () {
-  #likelihood
-  for (i in 1:n) {
-    y[i] ~ dnorm(mu[i], inv.var)
-    mu[i] <- beta[1] + beta[2]*x1[i] + beta[3]*x2[i] + beta[4]*x3[i]
-  }
-  #prior for beta
-  for (j in 1:4) {
-    beta[j] ~ 1#dunif(1) dnorm(0,0.00001)
-  }
-  #prior for inverse variance
-  inv.var = 1/(sigma^2)
-  sigma ~ dunif(0,100)
-}
-
-data.153.vjags <- list(
-  x1=(dataset153$x1),
-  x2=(dataset153$x2),
-  x3=(dataset153$x3),
-  n=length(dataset153$x3)
-)
-
-inits = function () {
-  betaVec = rnorm(4,0,5)
-  sigmaVal = runif(1);
-  return(list(beta=betaVec, sigma=sigmaVal))
-}
-
-parameters = c("beta", "sigma")
-model <- jags(model.file = lm1jags,
-              data=dataExtinct,
-              #inits=inits,
-              parameters.to.save = parameters)
+```{r, 153PartD, eval=F}
+glm_post2 <- stan_glm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
+                      data = dataset153, 
+                      family=gaussian, 
+                      prior=student_t(df = 4))
+summary(glm_post_mixed)
+stan_trace(glm_post_mixed)
 ```
 
 #### Part E
 Discuss other models for the regression coefficients.
+
+
+
 
 
 
