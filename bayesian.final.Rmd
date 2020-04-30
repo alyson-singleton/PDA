@@ -6,30 +6,13 @@ date: "4/30/2020"
 output: pdf_document
 ---
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = F, results='asis', warning=F, 
+knitr::opts_chunk$set(echo = F, eval=F, results='asis', warning=F, 
                       message=F, cache=T, fig.align="center", 
-                      set.seed(100))
+                      set.seed(100), fig.height=4.5, fig.width=6)
 # load libraries
-library(dplyr)
-library(tidyr)
-library(reshape2)
-library(naniar)
-library(grDevices)
-library(ggplot2)
-library(GGally)
-library(MASS)
-library(boot)
-library(leaps)
-library(corrplot)
-library(glmnet)
-library(neuralnet)
-library(devtools)
-library(ggbiplot)
-library(caret)
-library(standardize)
-library(kableExtra)
-library(knitr)
-library(dplyr)
+pacman::p_load(reshape2, naniar, actuar, dplyr, tidyr, kableExtra, knitr, LearnBayes, boot, lattice, gtools, ggplot2,
+               grDevices, GGally, MASS, leaps, LaplacesDemon, corrplot, rstan, rstanarm, bayesplot, glmnet, neuralnet,
+               devtools, ggbiplot, caret, standardize, EBglmnet)
 ```
 
 # Introduction
@@ -81,6 +64,8 @@ We measured possible differences using network measures that had been previously
 The primary comparison outcome measure across scenarios was the cumulative number of incident HIV infections over the simulation period. We also measured the number of months elapsed until ten incident infections, the number of HIV infections that incited the contact tracing investigation and the subsequent increase in testing activities to investigate how network structure may be related to epidemic velocity.
 
 ```{r, Glossary of Network Measures}
+############################################
+# Glossary of Network Measures
 glossary.df <- t(data.frame(c("Number of Components", "Number of components in the network, omitting isolated individuals.", "The number of components helps represent the dispersion of individuals across a static network, as individuals in separate components cannot, by definition, infect one another [Bearman et al., 2004; Estrada, 2012]."),
                             c("Component Size", "Number of individuals within a component.", "The size of the largest component in a static network represents an upper-bound for potential disease diffusion in the population [Estrada, 2012]."),
                             c("Density", "Number of ties in the network divided by the number of total possible ties in the network.", "Network density helps determine outbreak magnitude and represents the “knittedness” of the component of interest [Seidman, 1983; Tarwater and Martin, 2001]."),
@@ -99,20 +84,23 @@ kable(glossary.df, "latex", caption = "Glossary of terms guiding the analysis of
   column_spec(2:3, width = "6cm")
 ```
 
-```{r, Load Data}
-#load data
+```{r, Load Data, eval=T}
+############################################
+# Load Data
 sc.set.original <- read.csv("~/Desktop/research/SC_inj_net_dynamics/scripts/A3_conditions_ten_percent.csv")
 
 #specify only structural exposure vars and cuminc outcome
 sc.set.original[,1:6] <- NULL
-sc.set <- sc.set.original[c(1:19,30)] #remove other outcomes, can investigate later
+sc.set <- sc.set.original[c(1:19,30,43)]
+sc.set.cum.inc <- sc.set.original[c(1:19,30)]
+sc.set.ten.inc.inf <-  sc.set.original[c(1:19,43)]
 ```
 
 # Basic Data Investigation
 
 I began my investigation of the data by investigating the potential collinearity between the structural network measurements. Below you can see a correlation plot. I was unsprised to see groups of variables that were especially correlated. One group is a set of measurements on the placement of the randomly selected initial infection location (notated by "ii" for initial infection). There is a second group that is a set of structural characteristics that are mathematically similar, at least given our impletemented conditions on the network. This group is correlated because they investigate similar structures, although they each have valuable nuance and likely can differ more extemely in other types of networks, with different densities, for example. 
 
-```{r, Correlation Investigation, fig.width=7,fig.height=7}
+```{r, Correlation Investigation, fig.width=7,fig.height=7, eval=T}
 ############################################
 #correlation plot of all
 # corrplot(cor(sc.set), method = "circle", type = "lower", tl.col = "black", tl.srt = 45, order = "hclust")
@@ -120,7 +108,93 @@ I began my investigation of the data by investigating the potential collinearity
 #make a seperate set with a few correlated variabls removed (remove totalnodecount and totaledgecount)
 sc.set.limit <- sc.set[-c(1,10:13)]
 corrplot(cor(sc.set.limit), method = "circle", type = "lower", tl.col = "black", tl.srt = 45, order = "hclust") #FPC
+
+sc.set.cum.inc <- sc.set.cum.inc[-c(1,10:13)]
+sc.set.ten.inc.inf <-  sc.set.ten.inc.inf[-c(1,10:13)]
 #corrplot.mixed(cor(sc.set.limit))
+
+#remove even more for simplicity for this project
+#sc.set.limit$geodesic_dist <- NULL
+#sc.set.limit$maximum_degree <- NULL
+#sc.set.limit$ii_closeness_centrality <- NULL
+#sc.set.limit$ii_eigenvector_centrality <- NULL
+#sc.set.limit$betweenness_centrality <- NULL
+#sc.set.limit$prop_2_cores <- NULL
+
+#corrplot(cor(sc.set.limit), method = "circle", type = "lower", tl.col = "black", tl.srt = 45, order = "hclust") #FPC
+```
+
+```{r, Correlation bw Outcomes}
+############################################
+#relationship between the outcomes? yes!
+ggplot(data=sc.set, aes(x=ten_inf_ind, y=cumulative_incidence)) +
+  geom_point() +
+  labs(y="Number of Cumulative Infections", 
+       x="Time Until 10 Incident Infections") +
+       #title = "Relationship between Outcomes") +
+  theme(legend.position = "none",
+        legend.title = element_text(hjust = 0.5, face = "bold", size = 14),
+        legend.text = element_text(size = 10),
+        legend.direction = "vertical",
+        legend.box.just = "center",
+        legend.spacing.x = unit(0.5, 'cm'),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(color = "black"),
+        axis.title = element_text(size = 16, colour = "black", face = "bold"),
+        axis.text = element_text(size = 16, colour = "black"),
+        plot.title = element_text(size = 18, colour = "black", face = "bold", hjust=0.5, vjust = 0.8))
+```
+
+This gave me cause to choose Bayesian regularization methods as a focus of my project. Instead of simply removing variables displaying collinearity in the model, I was interest in using a Bayesian framework to analytically choose which predictors are most important in predictions of network vulnerability.
+
+Next, I looked at the shape of the relationships between each of the network measurements and our two outcomes, cumulative infections and time elapsed until 10 infections. Upon inspection, it appears that most variables have weak relationships with the outcome and are generally fairly linear, with exceptions. I decided to assume linearity for this analysis, but recognize that there are a few characteristics that would have benefitted from non-linear representation. I had hoped to have time to investigate this, but in the end I did not. Also, in this analysis I am particularly concerned in interpretability of the coefficients, given the direct application of the outcomes. A few of the plots are displayed below that represent the range of shapes for each of the outcomes.
+
+```{r, Linearity Investigation, fig.width=3.25, fig.height=2.25, fig.align="default", eval=T}
+# Wrt CumInc
+############################################
+#pairs plots
+#ggpairs(sc.set.limit,
+#        diag=list(continuous="density"), 
+        #columns=c(sc.set.limit$cumulative_incidence),
+#        axisLabels="show",
+#        mapping = ggplot2::aes(shape = ".", alpha = 0.1),
+#        progress=TRUE)
+# not linear wrt cuminc: max degree,ii_betweenness_centrality,ii_eigenvector_centrality
+
+ggplot(data=sc.set.limit) + 
+  geom_point(aes(x=sc.set.limit$component_density,y=sc.set.limit$cumulative_incidence), shape = ".") +
+  labs(x="Density", y="Cumulative Incidence", size=6)
+
+ggplot(data=sc.set.limit) + 
+  geom_point(aes(x=sc.set.limit$betweenness_centrality,y=sc.set.limit$cumulative_incidence), shape = ".") +
+  labs(x="Betweenness Centrality", y="Cumulative Incidence", size=6)
+
+ggplot(data=sc.set.limit) + 
+  geom_point(aes(x=sc.set.limit$ii_eigenvector_centrality,y=sc.set.limit$cumulative_incidence), shape = ".") +
+  labs(x="II Eigenvector Centrality", y="Cumulative Incidence", size=6)
+
+ggplot(data=sc.set.limit) + 
+  geom_point(aes(x=sc.set.limit$centralization,y=sc.set.limit$cumulative_incidence), shape = ".") +
+  labs(x="Centralization", y="Cumulative Incidence", size=6)
+
+ggplot() + 
+  geom_point(aes(x=sc.set.limit$component_density,y=sc.set.original$ten_inf_ind), shape = ".") +
+  labs(x="Density", y="Time until 10 Infections", size=6)
+
+ggplot() + 
+  geom_point(aes(x=sc.set.limit$betweenness_centrality,y=sc.set.original$ten_inf_ind), shape = ".") +
+  labs(x="Betweenness Centrality", y="Time until 10 Infections", size=6)
+
+ggplot() + 
+  geom_point(aes(x=sc.set.limit$ii_eigenvector_centrality,y=sc.set.original$ten_inf_ind), shape = ".") +
+  labs(x="II Eigenvector Centrality", y="Time until 10 Infections", size=6)
+
+ggplot() + 
+  geom_point(aes(x=sc.set.limit$centralization,y=sc.set.original$ten_inf_ind), shape = ".") +
+  labs(x="Centralization", y="Time until 10 Infections", size=6)
 ```
 
 \pagebreak
@@ -128,26 +202,78 @@ corrplot(cor(sc.set.limit), method = "circle", type = "lower", tl.col = "black",
 # Bayesian Model Framework
 Describe a model, including the prior distribution, and state clearly the assumptions made. Include a discussion of the implied data collection mechanism and steps to deal with unintended missing data.
 
+# Model Structure
 
+### Lasso Overview
+
+First, we being by reviewing the frequentist defintion of a Lasso regression--a method originally created for shriking the number of predictors in a wide data set. It is usually applied to a linear regresion, which we will employ in this analysis. Recall, where $\textbf{y}$ is the $n \times 1$ outcomes, $\mu$ is the grand mean, $\textbf{X}$ is the $n \times p$ standardized predictor data, $\boldsymbol{\beta} = (\beta_1,...,\beta_p)^T$ is the vector of regression coefficients to be determined, and $\boldsymbol{\epsilon}$ is the $n \times 1$ vector of independent and identically distributed normal errors with mean 0 and unknown variance $\sigma^2$.
+$$\textbf{y}=\mu\textbf{1}_n + \textbf{X}\boldsymbol{\beta} + \boldsymbol{\epsilon}$$
+We recall that the Lasso estimate $\hat{\boldsymbol{\beta}}$ minimizes the sum of the square of the residuals while being subject to a bound on its $L_1$ norm. In other words, the general form of the lasso regression optimization problem is minimizing the following, where $\tilde{\textbf{y}}$ is the mean-centered outcome vector and $\lambda\geq0$ related to the aforementioned bound:
+$$\min_\beta (\tilde{\textbf{y}}-\textbf{X}\boldsymbol{\beta})^T(\tilde{\textbf{y}}-\textbf{X}\boldsymbol{\beta}) +\lambda\sum_{i=1}^p|\beta_j|$$
+From here it is not a large leap into the bayesian framework. This expression provides the intuition that we can also interpret the Lasso as a a Bayesian posterior mode estimate when the parameters $\beta_i$ have independent
+and identical double exponential (Laplace) priors [Tibshirani, 1996; Hastie et al., 2001]. Indeed, we can write our priors on the $\beta_i$ in the following manner:
+$$p(\boldsymbol{\beta}) \propto \prod_{j=1}^p \frac{\lambda}{2} \exp(-\lambda|\beta_j|)$$
+This is quite intuitive when one looks at plots of Laplace functions. See below for three functions, each centered at zero with varying $\lambda$ values ($\lambda \in \{1,2,3\}$). By setting the centers of our priors for our coefficients to zero with a small scaling variable ($\lambda$), we can reflect high confidence that most of the coefficients are unimportant. This allows us to identify and select out only the coefficients that strongly supported by the data. We would expect to see the posterior distributions of the strongest predictors to pull away from a center of zero, while those weakest will be encouraged to remain in this shape.
+
+```{r, laplace visualizations, eval=T}
+x<-seq(-10,10,0.1)
+plot(x=seq(-10,10,0.1), y=LaplacesDemon::dlaplace(x,0,1), 
+     col="black", type = "l", 
+     xlim=c(-10,10), ylim=c(0,0.5),
+     xlab="", ylab="", 
+     main="Laplace Functions")
+lines(x=seq(-10,10,0.1), y=LaplacesDemon::dlaplace(x,0,2), col="darkblue")
+lines(x=seq(-10,10,0.1), y=LaplacesDemon::dlaplace(x,0,3), col="lightblue")
+legend("topright",col = c("black","darkblue", "lightblue"),
+       legend=c("Laplace(0, 1)","Laplace(0, 2)", "Laplace(0, 3)"),
+       lty = c(1,1,1))
+```
+
+
+Lastly, if we let $\sigma^2$ take on an independent prior when positive, the posterior distribution can indeed be expressed as:
+$$p(\boldsymbol{\beta},\sigma^2|\tilde{\textbf{y}}) \propto p(\sigma^2)(\sigma^2)^{-(n-1)/2} \exp\left\{-\frac{1}{2\sigma^2}(\tilde{\textbf{y}}-\textbf{X}\boldsymbol{\beta})^T(\tilde{\textbf{y}}-\textbf{X}\boldsymbol{\beta}) +\lambda\sum_{i=1}^p|\beta_j|\right\}$$
+For any fixed value of $\sigma^2 > 0$, we maximize $\boldsymbol{\beta}$ as our Lasso esimate, and therefore the posterior mode estimate will be a Lasso estimate as well. Critically, by using this method, we are deciding to summarize the posterior distribution (or, equivalently, the penalized likelihood function) by its mode. Lastly, the estimates will depend on our prior for $\sigma^2$ and our choice of hyerparameter $\lambda$. 
+
+### My Models
+
+Now, I will outline the specifics of the models I investigated for this project.
+
+$$p(\lambda^2|r,\delta) \propto (\lambda^2)^{r-1}\exp(-\delta\lambda^2)$$
 
 # Computational Methods -- Evaluation
 Describe the algorithms and computational methods used in the analysis (e.g. MCMC, EM). Check that the algorithms converged, and summarize the posterior distribution obtained for the different estimands in the model.
-```{r, Frequentist}
+```{r, scale, eval=T}
+sc.set.limit <- data.frame(scale(sc.set.limit))
+sc.set.cum.inc <- data.frame(scale(sc.set.cum.inc))
+sc.set.ten.inc.inf <- data.frame(scale(sc.set.ten.inc.inf))
+```
+
+## CI Models
+
+```{r, CI basic frequentist}
 library(car)
-freqlinmod <- glm(cumulative_incidence ~ ., 
-                  data=sc.set.limit, 
-                  family=gaussian)
+freq.lin.mod <- glm(cumulative_incidence ~ ., 
+                    data=sc.set.limit, 
+                    family=gaussian)
+summary(freq.lin.mod)
+vif(freq.lin.mod)
+
+#scale
+sc.set.limit.scaled <- data.frame(scale(sc.set.limit))
+freq.lin.scaled <- glm(cumulative_incidence ~ ., 
+                       data=sc.set.limit.scaled, 
+                       family=gaussian)
 summary(freqlinmod)
 vif(freqlinmod)
 ```
 
-```{r, Bayesian}
+```{r, CI basic bayesian}
 library(rstan)
 library(rstanarm)
 library(bayesplot)
 
 glm_post1 <- stan_glm(cumulative_incidence ~ ., 
-                      data=sc.set.limit, 
+                      data=sc.set.cum.inc, 
                       family=gaussian,
                       prior=NULL)
 summary(glm_post1)
@@ -159,28 +285,171 @@ stan_trace(glm_post1)
 
 #posterior predictive chekcs
 pp_check(glm_post1)
-pp_check(glm_post1)
-ppc_intervals(y = dataset153$y, yrep = posterior_predict(glm_post1),x = dataset153$x1)
+ppc_intervals(y = sc.set.limit$cumulative_incidence, yrep = posterior_predict(glm_post1), x = sc.set.limit$component_density)
+ppc_intervals(y = sc.set.limit$cumulative_incidence, yrep = posterior_predict(glm_post1), x = sc.set.limit$ten_inf_ind)
 
-stan_hist(glm_post1, pars=c("x1"), bins=40)
-post_samps_speed <- as.data.frame(glm_post1, pars=c("x1"))[,"x1"]
+stan_hist(glm_post1, pars=c("ten_inf_ind"), bins=40)
+post_samps_speed <- as.data.frame(glm_post1, pars=c("ten_inf_ind"))[,"ten_inf_ind"]
 mn_speed <- mean(post_samps_speed) # posterior mean 
 ci_speed <- quantile(post_samps_speed, probs=c(0.05, 0.95)) # posterior 90% interval 
 
 stan_hist(glm_post1, pars=c("x2"), bins=40)
 stan_hist(glm_post1, pars=c("x3"), bins=40)
+```
 
-
+```{r, CI hierarchical, fix intercept, normal}
 glm_post2 <- stan_glm(cumulative_incidence ~ ., 
-                      data=sc.set.limit, 
-                      family=gaussian)
+                      data = sc.set.cum.inc, 
+                      prior = normal(0,0.001),
+                      prior_intercept = NULL)
 summary(glm_post2)
 
 # Look at trace plots
 # Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
     #(all chains are overlapping around the same value).
 stan_trace(glm_post2)
+
+# Posterior Predictive Checks
+pp_check(glm_post2)
+ppc_intervals(y = sc.set.limit$cumulative_incidence, yrep = posterior_predict(glm_post2), x = sc.set.limit$component_density)
+ppc_intervals(y = sc.set.limit$cumulative_incidence, yrep = posterior_predict(glm_post2), x = sc.set.limit$ten_inf_ind)
 ```
+
+```{r, CI hierarchical, fix intercept, laplace, eval=T}
+glm_post3 <- stan_glm(cumulative_incidence ~ ., 
+                      data = sc.set.cum.inc, 
+                      prior = NULL,
+                      prior_intercept = NULL)
+summary(glm_post3)
+
+out3 <- summary(glm_post3)[1:10,c(3:6,8)]
+out3 <- out3[, c(2, 3, 4, 1, 5)]
+out3 <- data.frame(round(out3, 2))
+colnames(out3) <- c("10%", "50%", "90%", "Std Dev", "Rhat")
+
+kable(out3, "html", caption = "Bayesian OLS", booktabs = T)
+# Look at trace plots
+# Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
+    #(all chains are overlapping around the same value).
+stan_trace(glm_post3)
+
+# Posterior Predictive Checks
+pp_check(glm_post3)
+ppc_intervals(y = sc.set.cum.inc$cumulative_incidence, yrep = posterior_predict(glm_post3), x = sc.set.cum.inc$component_density)
+ppc_intervals(y = sc.set.cum.inc$cumulative_incidence, yrep = posterior_predict(glm_post3), x = sc.set.cum.inc$component_size)
+ppc_intervals(y = sc.set.cum.inc$cumulative_incidence, yrep = posterior_predict(glm_post3), x = sc.set.cum.inc$ii_eigenvector_centrality)
+ppc_intervals(y = sc.set.cum.inc$cumulative_incidence, yrep = posterior_predict(glm_post3), x = sc.set.cum.inc$centralization)
+
+stan_hist(glm_post3, pars=c("geodesic_dist"), bins=40)
+stan_hist(glm_post3, pars=c("ii_closeness_centrality"), bins=40)
+stan_hist(glm_post3, pars=c("number_connected_components"), bins=40)
+stan_hist(glm_post3, pars=c("centralization"), bins=40)
+
+
+
+post_samps_speed <- as.data.frame(glm_post3, pars=c("geodesic_dist"))[,"geodesic_dist"]
+mn_speed <- mean(post_samps_speed) # posterior mean 
+ci_speed <- quantile(post_samps_speed, probs=c(0.05, 0.95))
+
+
+##cross validation for lambda
+xNames<-colnames(sc.set.cum.inc)[1:14]
+
+cv.EBglmnet(as.matrix(sc.set.cum.inc[,xNames]), as.matrix(sc.set.cum.inc[,"cumulative_incidence"]), family="gaussian",
+            prior= "lassoNEG", nfolds=5, Epis = FALSE, group = FALSE, verbose = 0)
+lasso.cv <- cv.EBglmnet(as.matrix(sc.set.cum.inc[,xNames]), as.matrix(sc.set.cum.inc[,"cumulative_incidence"]), family="gaussian",
+            prior= "lasso", nfolds=5, Epis = FALSE, group = FALSE, verbose = 0)
+lasso.cv$fit
+```
+
+## Time Until Ten Infections Models
+```{r, TtilTen basic frequentist}
+library(car)
+freq.lin.mod <- glm(ten_inf_ind ~ ., 
+                    data=sc.set.ten.inc.inf, 
+                    family=gaussian)
+summary(freq.lin.mod)
+vif(freq.lin.mod)
+
+#scale
+sc.set.ten.inc.inf.scaled <- data.frame(scale(sc.set.ten.inc.inf))
+freq.lin.scaled <- glm(ten_inf_ind ~ ., 
+                       data=sc.set.ten.inc.inf.scaled, 
+                       family=gaussian)
+summary(freqlinmod)
+vif(freqlinmod)
+```
+
+```{r, TtilTen basic bayesian}
+library(rstan)
+library(rstanarm)
+library(bayesplot)
+
+glm_post110 <- stan_glm(ten_inf_ind ~ ., 
+                      data=sc.set.ten.inc.inf, 
+                      family=gaussian,
+                      prior=NULL)
+summary(glm_post110)
+
+# Look at trace plots
+# Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
+    #(all chains glm_post110 overlapping around the same value).
+stan_trace(glm_post1)
+
+#posterior predictive chekcs
+pp_check(glm_post110)
+ppc_intervals(y = sc.set.ten.inc.inf$ten_inf_ind, yrep = posterior_predict(glm_post110), x = sc.set.ten.inc.inf$component_density)
+ppc_intervals(y = sc.set.ten.inc.inf$ten_inf_ind, yrep = posterior_predict(glm_post110), x = sc.set.ten.inc.inf$ii_eigenvector_centrality)
+
+stan_hist(glm_post110, pars=c("ten_inf_ind"), bins=40)
+post_samps_speed <- as.data.frame(glm_post110, pars=c("ten_inf_ind"))[,"ten_inf_ind"]
+mn_speed <- mean(post_samps_speed) # posterior mean 
+ci_speed <- quantile(post_samps_speed, probs=c(0.05, 0.95)) # posterior 90% interval 
+
+stan_hist(glm_post110, pars=c("x2"), bins=40)
+stan_hist(glm_post110, pars=c("x3"), bins=40)
+```
+
+```{r, TtilTen hierarchical, fix intercept, normal}
+glm_post210 <- stan_glm(ten_inf_ind ~ ., 
+                      data = sc.set.ten.inc.inf, 
+                      prior = normal(0,0.001),
+                      prior_intercept = NULL)
+summary(glm_post210)
+
+# Look at trace plots
+# Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
+    #(all chains are overlapping around the same value).
+stan_trace(glm_post210)
+
+# Posterior Predictive Checks
+pp_check(glm_post210)
+ppc_intervals(y = sc.set.ten.inc.inf$ten_inf_ind, yrep = posterior_predict(glm_post210), x = sc.set.ten.inc.inf$component_density)
+ppc_intervals(y = sc.set.ten.inc.inf$ten_inf_ind, yrep = posterior_predict(glm_post210), x = sc.set.ten.inc.inf$ten_inf_ind)
+```
+
+```{r, TtilTen hierarchical, fix intercept, laplace}
+glm_post310 <- stan_glm(log(ten_inf_ind) ~ ., 
+                      data = sc.set.ten.inc.inf, 
+                      prior = laplace(0,1),
+                      prior_intercept = NULL)
+summary(glm_post310)
+
+# Look at trace plots
+# Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
+    #(all chains are overlapping around the same value).
+stan_trace(glm_post310)
+
+# Posterior Predictive Checks
+pp_check(glm_post310)
+ppc_intervals(y = log(sc.set.ten.inc.inf$ten_inf_ind), yrep = posterior_predict(glm_post310), x = sc.set.ten.inc.inf$component_density)
+ppc_intervals(y = sc.set.ten.inc.inf$ten_inf_ind, yrep = posterior_predict(glm_post310), x = sc.set.ten.inc.inf$component_size)
+ppc_intervals(y = sc.set.ten.inc.inf$ten_inf_ind, yrep = posterior_predict(glm_post310), x = sc.set.ten.inc.inf$ii_eigenvector_centrality)
+ppc_intervals(y = sc.set.ten.inc.inf$ten_inf_ind, yrep = posterior_predict(glm_post310), x = sc.set.ten.inc.inf$centralization)
+```
+
+
+## Multivariate Models
 
 # Posterior Predictive Checks
 Perform checks that the analysis and the model are reasonable, including showing that the model can generate replicate data that agree with the observed data and that are scientifically plausible (in ways similar to the one described in class).

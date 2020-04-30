@@ -12,7 +12,7 @@ pacman::p_load(actuar, dplyr, kableExtra, knitr, LearnBayes, boot, lattice, gtoo
                LaplacesDemon, rstan, rstanarm, bayesplot)
 ```
 
-## 1. The Importance Sampling Algorithm
+## 1* The Importance Sampling Algorithm
 #### Part A
 ```{r, imp.sampA}
 # Arguments:
@@ -896,7 +896,7 @@ kable_styling(latex_options = c("striped", "hold_position"))
 
 \newpage
 
-## 7. Chapter 13 Question 5
+## 7* Chapter 13 Question 5
 Estimating the number of unseen species (see Fisher, Corbet, and Williams, 1943, Efron and Thisted, 1976, and Seber, 1992): suppose that during an animal trapping expedition the number of times an animal from species i is caught is $x_i \sim Poisson(\lambda_i)$. For parts (a)–(d) of this problem, assume a $Gamma(\alpha,\beta)$ prior distribution for the $\lambda_i$’s, with a uniform hyperprior distribution on $(\alpha,\beta)$. The only observed data are $y_k$, the number of species observed exactly k times during a trapping expedition, for $k = 1, 2, 3,...$
 
 #### Part A
@@ -927,16 +927,21 @@ Discuss the sensitivity of the inference in (d) to each of the model assumptions
 
 
 ## 8. Generate / simulate n = 120 observations from a three component mixture 
+We are instructed to simulate n = 120 observations from a three component mixture Gaussian model where $(p_1, p_2, p_3) = (0.1, 0.3, 0.6)$ and $(\mu_1, \sigma_1^2) = (0,1)$, $(\mu_2, \sigma_21^2) = (-2,2)$, and $(\mu_3, \sigma_3^2) = (3,16)$. See below for the mixture model's distribution where the three means are displayed with black lines. I use k-means clustering algorithm to build a set of labels to initialize my EM algorithm.
 
 ```{r, Prep}
 set.seed(100)
 #investigate model and pull 120 observations as directed
-y <- seq(-50,50,0.1)
+y <- seq(-10,15,0.1)
 #dens <- function (x, theta, stnd){dnorm (x, theta, sqrt(1000*theta*(1-theta)))}
 dens.mix <- 0.1*dnorm(y,0,1) + 0.3*dnorm(y,-2,sqrt(2)) + 0.6*dnorm(y,3,sqrt(16))
 plot (y, dens.mix, ylim=c(0,1.1*max(dens.mix)),
-      type="l", xlab="y", ylab="", xaxs="i",
-      yaxs="i", yaxt="n", bty="n", cex=2)
+      type="l", xlab="", ylab="", xaxs="i",
+      yaxs="i", yaxt="n", bty="n", cex=2,
+      main="Gaussian Mixture Model")
+lines(x=c(0,0), y=c(0,0.5))
+lines(x=c(-2,-2), y=c(0,0.5))
+lines(x=c(3,3), y=c(0,0.5))
 
 vals.mix <- c(rnorm(120*0.1,0,1), rnorm(120*0.3,-2,sqrt(2)), rnorm(0.6*120,3,sqrt(16)))
 labels <- c(rep(1, 12), rep(2, 36), rep(3, 72))
@@ -964,7 +969,10 @@ vals.summary.df <- vals.df %>%
 ```
 
 #### Part A
+First, we implement an EM algorithm to find the MLEs for $p_i, \mu_i,$ and $\sigma^2_i$ for $i\in \{1,2,3\}$. I coded three functions: the e-step, the m-step, and a function to loop/iterate between the two. All of the code can be found in the appendix. The output of this algorithm is displayed below both in the table and the figure. They obviously fit the data well but do not end up at the values that we used to build the mixture model, rather they pretty much stay at the values built by the k-means labels. I will discuss this further in Part C. 
+
 ```{r, 8A}
+###Problem 8 Part A
 #e step
 e_step <- function(x, mu.vector, sd.vector, p.vector) {
   comp1.prod <- dnorm(x, mu.vector[1], sd.vector[1]) * p.vector[1]
@@ -1036,7 +1044,11 @@ for (i in 1:2000) {
 }
 
 #loglik.vector
-m.step
+m.stepdf <- t(data.frame(m.step))
+colnames(m.stepdf) <- c("Gaussian 1", "Gaussian 2", "Gaussian 3")
+kable(m.stepdf, "latex", caption = "EM Algorithm MLEs", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+
 
 plot_mix_comps <- function(x, mu, sigma, lam) {
   lam * dnorm(x, mu, sigma)
@@ -1060,11 +1072,16 @@ data.frame(x = vals.mix$vals.mix) %>%
                 colour = "green", lwd = 1.5) +
   ylab("Density") +
   xlab("Values") +
-  ggtitle("Final GMM Fit")
+  ggtitle("EM Algorithm Fit")
 ```
 
 #### Part B
+Next, we implement an the MCM Gibbs algorithm to find the posterior distributions for $p_i, \mu_i,$ and $\sigma^2_i$ for $i\in \{1,2,3\}$. All of the code can again be found in the appendix. The output of this algorithm is displayed below both in the table and the figure. The Gibbs algorithm seems to do just as well as the EM algorithm. Interestingly, it gets similarly stuck in the same wrong spot. Notably, I used completely uninformative priors (compared to above where I used the k-means clustering labels). If I had more time I would try out other priors and possibly include a function to add more variability to steps' movements.
+
+ADD IN SIGMA PROGRESSION
+
 ```{r, 8B}
+###Problem 8 Part B
 # mixed gaussian model functions
 
 normalize = function(x){return(x/sum(x))}
@@ -1082,7 +1099,7 @@ sample_z = function(x,pi,mu){
 
 sample.pi.post = function(z,k) {
   counts = colSums(outer(z,1:k,FUN="=="))
-  pi = rdirichlet(1,counts+1)
+  pi = LearnBayes::rdirichlet(1,counts+1)
   return(pi)
 }
 
@@ -1092,7 +1109,6 @@ sample_mu = function(x, z, k, prior){
   for(i in 1:k){
     sample.size = sum(z==i)
     sample.mean = ifelse(sample.size==0,0,mean(x[z==i]))
-    
     post.prec = sample.size+prior$prec
     post.mean = (prior$mean * prior$prec + sample.mean * sample.size)/post.prec
     mu[i] = rnorm(1,post.mean,sqrt(1/post.prec))
@@ -1112,11 +1128,11 @@ gibbs.sampler.8 <- function(x, k, muprior = list(mean=0,prec=0.1)) {
                                "p1", "p2", "p3")
   z.storage <- matrix(NA, nrow=sims, ncol=length(vals.mix$vals.mix))
   
-  #starting values for theta, tau, sigma and mu (calculated from our sample build earlier, theta.start)
-  param.storage[1,1:3] <- vals.summary.df$mu
+  #starting values for theta, tau, sigma and mu (calculated from our sample build earlier)
+  param.storage[1,1:3] <- c(0,0,0)#vals.summary.df$mu
   param.storage[1,4:6] <- vals.summary.df$variance
-  param.storage[1,7:9] <- vals.summary.df$p
-  z.storage[1,] <- vals.kmeans.cluster
+  param.storage[1,7:9] <- c(1/3,1/3,1/3)#vals.summary.df$p
+  z.storage[1,] <- rep(c(1,2,3),40)#vals.kmeans.cluster
   
   #interations
   for (i in 2:sims) {
@@ -1125,17 +1141,20 @@ gibbs.sampler.8 <- function(x, k, muprior = list(mean=0,prec=0.1)) {
     param.storage[i,1:3] = sample_mu(x,z.storage[i,],k,muprior)
   }
 return(param.storage)
+return(z.storage)
 }
 
 gibbs.output.8 <- data.frame(gibbs.sampler.8(vals.mix$vals.mix, 3))
-#gibbs.output.8 <- gibbs.output.8[800:1000,]
 
-plot(gibbs.output.8$mu1,ylim=c(-30,30),type="l")
+plot(gibbs.output.8$mu1,ylim=c(-10,15),type="l",main="Gibbs Algorithm Mu Estimates")
 lines(gibbs.output.8$mu2,col=2)
 lines(gibbs.output.8$mu3,col=3)
 
 #summary table
-t(apply(gibbs.output.8, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975),na.rm = T)))
+gibbsgausmix.df <- data.frame(t(apply(gibbs.output.8, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975),na.rm = T))))
+colnames(gibbsgausmix.df) <- c("2.5%", "25%", "50%", "75%", "97.5%")
+kable(gibbsgausmix.df, "latex", caption = "Gibbs Algorithm Posterior Distribution", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
 
 
 data.frame(x = vals.mix$vals.mix) %>%
@@ -1143,32 +1162,24 @@ data.frame(x = vals.mix$vals.mix) %>%
   geom_histogram(aes(x, ..density..), binwidth = 1, colour = "black", 
                  fill = "white") +
   stat_function(geom = "line", fun = plot_mix_comps,
-                args = list(m.step$mu[1], sqrt(m.step$var[1]), 
-                           lam = m.step$p[1]),
+                args = list(mean(gibbs.output.8$mu1[500:1000]), sqrt(mean(gibbs.output.8$sigma1[500:1000])), 
+                           lam = mean(gibbs.output.8$p1[500:1000])),
                 colour = "red", lwd = 1.5) +
   stat_function(geom = "line", fun = plot_mix_comps,
-                args = list(m.step$mu[2], sqrt(m.step$var[2]), 
-                            lam = m.step$p[2]),
+                args = list(mean(gibbs.output.8$mu2[500:1000]), sqrt(mean(gibbs.output.8$sigma2[500:1000])), 
+                            lam = mean(gibbs.output.8$p2[500:1000])),
                 colour = "blue", lwd = 1.5) +
   stat_function(geom = "line", fun = plot_mix_comps,
-                args = list(m.step$mu[3], sqrt(m.step$var[3]), 
-                            lam = m.step$p[3]),
+                args = list(mean(gibbs.output.8$mu3[500:1000]), sqrt(mean(gibbs.output.8$sigma3[500:1000])), 
+                            lam = mean(gibbs.output.8$p3[500:1000])),
                 colour = "green", lwd = 1.5) +
   ylab("Density") +
   xlab("Values") +
-  ggtitle("Final GMM Fit")
-
+  ggtitle("Gibbs Algorithm Posterior Fit")
 ```
 
 #### Part C
-Compare the two.
-
-
-
-
-
-
-
+As I mentioned above, both approaches produce very similar results. Unfortunately, neither appear to be able to find the true grouping of normals. I wonder if something is going wrong in my code, if using the k-means labels was potentially an inappropriate way to start my models, my attempts were no better than the one line of code I used to build the k-means labels, or if this is the point of the exercise. If I had more time, I would be interested in testing this out further. However, I am encouraged by getting both models working and that they both create a set of normals that fit our set of 120 samples. 
 
 
 ## 9. Chapter 15 question 3
@@ -1176,6 +1187,8 @@ Regression with many explanatory variables: Table 15.2 displays data from a desi
 
 #### Part A
 Fit an ordinary linear regression model (that is, nonhierarchical with a uniform prior distribution on the coefficients), including a constant term and the nine explanatory variables above.
+
+First, I made sure to standardize (i.e. mean centering and scaling) my predictors along with my outcome as Marquardt and Snee (1975) recommend that we be sure to do. This helps us deal with the collinearity in the predictors that is quite intuitive given that the last six are derived directly from the first three. Now, we run a basic ordinary linear regression model. I used both a frequentist method and a bayesian method with the defined priors to compare the results. They were consistent, as I would expect them to be. See the beta coefficient estimates for these models below:  
 
 ```{r, 153PartA Prep}
 #load data
@@ -1185,29 +1198,30 @@ dataset153 <- data.frame(c(1300, 1300, 1300, 1300, 1300, 1300, 1200, 1200, 1200,
                            0.0840, 0.0980, 0.0920, 0.0860),
                          c(49.0, 50.2, 50.5, 48.5, 47.5, 44.5, 28.0, 31.5, 34.5, 35.0, 38.0, 38.5, 15.0, 17.0, 20.5, 19.5))
 colnames(dataset153) <- c("x1", "x2", "x3", "y")
+
+# standardizations
+#get means for later in case
+dataset153<-data.frame(scale(dataset153))
 ```
 
 ```{r, MODEL 1 : frequentist model}
 # MODEL 1 : frequentist model
-library(car)
-freq.mod <- lm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + poly(x1,2) + poly(x2,2) + poly(x3,2), data = dataset153)
-summary(freq.mod)
-output <- summary(freq.mod)$coef[, 1:2]
-out <- cbind(output, confint(freq.mod)[c(1:4,6,8,10:13),])
-colnames(out) <- c("posterior mean", "posterior std", "2.5", "97.5")
-round(out, 2)
-
 freq.mod <- lm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), data = dataset153)
-summary(freq.mod)
+#summary(freq.mod)
 output <- summary(freq.mod)$coef[, 1:2]
-out <- cbind(output, confint(freq.mod)[c(1:10),])
-colnames(out) <- c("posterior mean", "posterior std", "2.5", "97.5")
-round(out, 2)
-vif(freq.mod)
+out1 <- cbind(output, confint(freq.mod)[c(1:10),])
+colnames(out1) <- c("50%", "sd", "2.5%", "97.5%")
+out1 <- out1[, c(3, 1, 4, 2)]
+out1 <- data.frame(round(out1, 2))
+colnames(out1) <- c("2.5%", "50%", "97.5%", "Std Dev")
+
+kable(out1, "latex", caption = "Frequentist Model Estimates", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+#vif(freq.mod)
 
 ```
 
-```{r, MODEL 2 : MCMC regress}
+```{r, MODEL 2 : MCMC regress, eval=F}
 # MODEL 2 : use simple MCMC regress (uniform priors?)
 library(MCMCpack)
 part.a.mod2 <- MCMCregress(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
@@ -1222,7 +1236,9 @@ library(rjags)
 library(R2jags)
 
 dataset153.dat<-list(y=dataset153$y,
-                     x1=dataset153$x1, x2=dataset153$x2, x3=dataset153$x3)
+                     x1=dataset153$x1, 
+                     x2=dataset153$x2, 
+                     x3=dataset153$x3)
 
 cat(
     "model{
@@ -1230,11 +1246,11 @@ cat(
       y[i] ~dnorm(mu[i] , tau)
       mu[i] <- beta0 + beta1*x1[i] + beta2*x2[i] + beta3*x3[i]
     }
-    beta0 ~dnorm(0, 0.00001)
+    beta0 ~dunif(-1000, 1000)
     beta1  ~dnorm(0, 0.00001)
     beta2 ~dnorm(0, 0.00001)
     beta3 ~dnorm(0, 0.00001)
-    tau ~ dgamma (0.001, 0.001)
+    tau ~ dinvchi (0.001, 0.001)
     sigma2 <- 1/tau}",
     file="m1.jag"
     )
@@ -1260,51 +1276,70 @@ traceplot(m1)
 plot(as.mcmc(m1))
 ```
 
-```{r, MODEL 4 : use stan, eval=F}
+```{r, MODEL 4 : use stan, results='hide',fig.keep='all'}
 # MODEL 4 : use stan
 library(rstan)
 library(rstanarm)
 library(bayesplot)
 
-glm_post1 <- stan_glm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
+#intercept:constant term,fixed effect
+#mean center and scale:standardize
+
+invisible(glm_post1 <- stan_glm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
                       data = dataset153, 
                       family=gaussian, 
-                      prior=NULL)
-summary(glm_post1)
+                      prior=NULL))
+#summary(glm_post1)
+out2 <- summary(glm_post1)[1:10,3:6]
+out2 <- out2[, c(2, 3, 4, 1)]
+out2 <- data.frame(round(out2, 2))
+colnames(out2) <- c("10%", "50%", "90%", "Std Dev")
+  
+kable(out2, "latex", caption = "Bayesian Model Estimates", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
 
 # Look at trace plots
 # Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
     #(all chains are overlapping around the same value).
-stan_trace(glm_post1)
+#stan_trace(glm_post1)
 
 #posterior predictive chekcs
-pp_check(glm_post1)
-ppc_intervals(y = dataset153$y, yrep = posterior_predict(glm_post1),x = dataset153$x1)
+#pp_check(glm_post1)
+#ppc_intervals(y = dataset153$y, yrep = posterior_predict(glm_post1), x = dataset153$x1)
 
-stan_hist(glm_post1, pars=c("x1"), bins=40)
+#stan_hist(glm_post1, pars=c("x1"), bins=40)
 post_samps_speed <- as.data.frame(glm_post1, pars=c("x1"))[,"x1"]
 mn_speed <- mean(post_samps_speed) # posterior mean 
 ci_speed <- quantile(post_samps_speed, probs=c(0.05, 0.95)) # posterior 90% interval 
 
-stan_hist(glm_post1, pars=c("x2"), bins=40)
-stan_hist(glm_post1, pars=c("x3"), bins=40)
+#stan_hist(glm_post1, pars=c("x2"), bins=40)
+#stan_hist(glm_post1, pars=c("x3"), bins=40)
 ```
 
 #### Part B
 Fit a mixed-effects linear regression model with a uniform prior distribution on the constant term and a shared normal prior distribution on the coefficients of the nine variables above. If you use iterative simulation in your computations, be sure to use multiple sequences and monitor their joint convergence.
 
-```{r, 153PartB, eval=F}
-glm_post_mixed <- stan_glm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
+```{r, 153PartB, results='hide',fig.keep='all'}
+invisible(glm_post_mixed <- stan_glm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
                       data = dataset153, 
-                      family=gaussian, 
-                      prior=normal(0,5),
-                      prior_intercept = NULL)
-summary(glm_post_mixed)
+                      family = gaussian(), 
+                      prior = normal(),
+                      prior_intercept = NULL))
+#summary(glm_post_mixed)
+out3 <- summary(glm_post_mixed)[1:10,3:6]
+out3 <- out3[, c(2, 3, 4, 1)]
+out3 <- data.frame(round(out3, 2))
+colnames(out3) <- c("10%", "50%", "90%", "Std Dev")
+
+kable(out3, "latex", caption = "Hierarchical Normal Bayesian Model Estimates", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+
+#tau:chisquarred15.4
 
 # Look at trace plots
 # Ideally we want the chains in each trace plot to be stable (centered around one value) and well-mixed 
     #(all chains are overlapping around the same value).
-stan_trace(glm_post_mixed)
+#stan_trace(glm_post_mixed)
 ```
 
 #### Part C
@@ -1313,13 +1348,24 @@ Discuss the differences between the inferences in (a) and (b). Interpret the dif
 #### Part D
 Repeat (a), but with a t4 prior distribution on the nine variables.
 
-```{r, 153PartD, eval=F}
-glm_post2 <- stan_glm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
+```{r, 153PartD, results='hide',fig.keep='all'}
+invisible(glm_t4 <- stan_glm(y ~ x1 + x2 + x3 + x1*x2 + x1*x3 + x2*x3 + I(x1^2) + I(x2^2) + I(x3^2), 
                       data = dataset153, 
-                      family=gaussian, 
-                      prior=student_t(df = 4))
-summary(glm_post_mixed)
-stan_trace(glm_post_mixed)
+                      family = gaussian(), 
+                      prior=student_t(df = 4),
+                      prior_intercept = NULL))
+
+#stan_trace(glm_t4)
+#summary(glm_t4)
+out4 <- summary(glm_t4)[1:10,3:6]
+out4 <- out4[, c(2, 3, 4, 1)]
+out4 <- data.frame(round(out4, 2))
+colnames(out4) <- c("10%", "50%", "90%", "Std Dev")
+
+kable(out4, "latex", caption = "Hierarchical T4 Bayesian Model Estimates", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+
+#summary(glm_t4)
 ```
 
 #### Part E
